@@ -103,10 +103,11 @@ export default function App() {
   const [carrello, setCarrello] = useState([])
   const [loading, setLoading] = useState(true)
   const [errore, setErrore] = useState(null)
-  const [isCheckout, setIsCheckout] = useState(false) // Stato per evitare doppi click
+  const [isCheckout, setIsCheckout] = useState(false) 
 
   useEffect(() => {
-    fetch('http://localhost:8000/api/products')
+    // CORRETTO: Aggiunto /api/products alla fine dell'URL
+    fetch('https://cnl-shop-backend.onrender.com/api/products')
       .then(res => {
         if (!res.ok) throw new Error("Errore server")
         return res.json()
@@ -131,11 +132,11 @@ export default function App() {
 
   const totaleCarrello = carrello.reduce((acc, item) => acc + item.prezzo, 0)
 
-  // NUOVA FUNZIONE DI CHECKOUT COLLEGATA AL DATABASE
   const gestisciCheckout = async () => {
     setIsCheckout(true)
     try {
-      const response = await fetch('http://localhost:8000/api/orders', {
+      // CORRETTO: Sostituito localhost con l'URL di Render
+      const response = await fetch('https://cnl-shop-backend.onrender.com/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -149,7 +150,7 @@ export default function App() {
       const data = await response.json();
       alert(`✅ Ordine #${data.ordine_id} salvato correttamente nel database!\n\nTotale: €${totaleCarrello.toFixed(2)}`);
       
-      setCarrello([]); // Svuota il carrello dopo il successo
+      setCarrello([]); 
     } catch (error) {
       console.error("Errore:", error);
       alert("❌ Errore di connessione. Verifica che il backend sia acceso.");
