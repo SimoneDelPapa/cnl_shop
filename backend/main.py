@@ -2,13 +2,13 @@ import os
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer # <-- AGGIUNTO per proteggere le rotte
+from fastapi.security import OAuth2PasswordBearer
 from dotenv import load_dotenv
 
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
-from passlib.context import CryptContext
 import jwt
+import bcrypt  # <-- Importiamo bcrypt nativo al posto di passlib
 
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session
@@ -27,20 +27,24 @@ engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# --- CONFIGURAZIONE PASSWORD HASHING E JWT ---
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# --- CONFIGURAZIONE JWT ---
 SECRET_KEY = os.getenv("SECRET_KEY", "chiave_segreta_super_sicura_da_cambiare_in_produzione")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 
-# Indica a FastAPI dove il frontend deve prendere il token
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
 
-def get_password_hash(password: str):
-    return pwd_context.hash(password)
+# --- CONFIGURAZIONE PASSWORD HASHING (NATIVA CON BCRYPT) ---
+def get_password_hash(password: str) -> str:
+    pwd_bytes = password.encode('utf-8')
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(pwd_bytes, salt)
+    return hashed.decode('utf-8')
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    pwd_bytes = plain_password.encode('utf-8')
+    hashed_bytes = hashed_password.encode('utf-8')
+    return bcrypt.checkpw(pwd_bytes, hashed_bytes)
 
 def create_access_token(data: dict):
     to_encode = data.copy()
@@ -63,7 +67,6 @@ class Ordine(Base):
     id = Column(Integer, primary_key=True, index=True)
     totale = Column(Float, nullable=False)
     stato_pagamento = Column(String, default="In attesa")
-    # Aggiunto il collegamento all'utente (nullable=True per non rompere ordini vecchi nel DB)
     utente_id = Column(Integer, ForeignKey("utenti.id"), nullable=True) 
     
     articoli = relationship("ArticoloOrdine", back_populates="ordine")
@@ -147,12 +150,11 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        # Usa PyJWT per decodificare il token
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id: str = payload.get("sub")
         if user_id is None:
             raise credentials_exception
-    except jwt.PyJWTError: # Gestisce le eccezioni di PyJWT (scaduto o falso)
+    except jwt.PyJWTError:
         raise credentials_exception
     
     user = db.query(Utente).filter(Utente.id == int(user_id)).first()
@@ -207,11 +209,9 @@ def get_products():
         {"id": 4, "nome": "Cuffia in silicone", "prezzo": 8.00, "personalizzabile": False}
     ]
 
-# ROTTA PROTETTA: Ora richiede il token per salvare l'ordine
 @app.post("/api/orders")
 def crea_ordine(ordine_in: OrdineCreate, db: Session = Depends(get_db), current_user: Utente = Depends(get_current_user)):
     try:
-        # Associa l'ordine all'utente appena trovato tramite il token
         nuovo_ordine = Ordine(totale=ordine_in.totale, utente_id=current_user.id)
         db.add(nuovo_ordine)
         db.commit()
