@@ -1,7 +1,7 @@
 import os
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from dotenv import load_model, load_dotenv # Aggiunto
+from dotenv import load_dotenv
 # ... altri import ...
 
 # Carica le variabili dal file .env se siamo in locale
