@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100dvh;
+  /* Applichiamo il gradiente iOS direttamente al corpo della pagina */
+  background: linear-gradient(to bottom right, #1e1b4b, #1e40af, #0f172a);
+  background-attachment: fixed;
+  
+  /* Disattiva l'effetto elastico bianco del browser sopra e sotto */
+  overscroll-behavior: none;
+}
