@@ -3,8 +3,7 @@ name: Deploy Frontend to GitHub Pages
 on:
   push:
     branches: [ main ]
-    paths:
-      - 'frontend/**'
+  workflow_dispatch:  # <-- QUESTA RIGA CREA IL PULSANTE MANUALE SU GITHUB
 
 permissions:
   contents: read
