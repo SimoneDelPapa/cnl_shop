@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
-import react from '@vitejs/plugin-react'
+import react from '@vitejs/plugin-react' // o il tuo plugin react corrente
 
-// https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  base: '/cnl_shop/', // <-- Controlla che coincida ESATTAMENTE con il nome del tuo repo su GitHub
 })
