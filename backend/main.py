@@ -3,10 +3,12 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-# Aggiungi 'create_engine' all'inizio dell'elenco
+# --- IMPORT AGGIUNTI (Risolvono l'errore NameError) ---
+from pydantic import BaseModel
+from typing import List, Optional
+
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session
-# ... altri import ...
 
 # Carica le variabili dal file .env se siamo in locale
 load_dotenv()
@@ -22,7 +24,6 @@ if SQLALCHEMY_DATABASE_URL.startswith("postgres://"):
     SQLALCHEMY_DATABASE_URL = SQLALCHEMY_DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 engine = create_engine(SQLALCHEMY_DATABASE_URL)
-# ... tutto il resto del codice del database e delle rotte rimane identico ...
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
