@@ -1,12 +1,13 @@
 import os
+from datetime import datetime, timedelta
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-# --- IMPORT AGGIUNTI PER LA REGISTRAZIONE ---
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 from passlib.context import CryptContext
+import jwt
 
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session
@@ -14,13 +15,12 @@ from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session
 # Carica le variabili dal file .env se siamo in locale
 load_dotenv()
 
-# Prende la variabile d'ambiente (su Render la imposteremo dal loro pannello)
+# Prende la variabile d'ambiente
 SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not SQLALCHEMY_DATABASE_URL:
     raise RuntimeError("DATABASE_URL non configurata!")
 
-# Se la stringa inizia con postgres:// (vecchio standard), SQLAlchemy v2 richiede postgresql://
 if SQLALCHEMY_DATABASE_URL.startswith("postgres://"):
     SQLALCHEMY_DATABASE_URL = SQLALCHEMY_DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -28,15 +28,28 @@ engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# --- CONFIGURAZIONE PASSWORD HASHING ---
+# --- CONFIGURAZIONE PASSWORD HASHING E JWT ---
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+# Chiave segreta per i JWT (in produzione andrebbe messa nel file .env)
+SECRET_KEY = os.getenv("SECRET_KEY", "chiave_segreta_super_sicura_da_cambiare_in_produzione")
+ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # Il token scade in 7 giorni
 
 def get_password_hash(password: str):
     return pwd_context.hash(password)
 
-# --- 2. MODELLI DATABASE (Tabelle) ---
+def verify_password(plain_password, hashed_password):
+    return pwd_context.verify(plain_password, hashed_password)
 
-# NUOVO MODELLO: Tabella Utenti
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+# --- MODELLI DATABASE (Tabelle) ---
 class Utente(Base):
     __tablename__ = "utenti"
     id = Column(Integer, primary_key=True, index=True)
@@ -66,15 +79,15 @@ class ArticoloOrdine(Base):
 
     ordine = relationship("Ordine", back_populates="articoli")
 
-# Crea le tabelle nel database (creerà in automatico la nuova tabella 'utenti')
 Base.metadata.create_all(bind=engine)
 
-
-# --- 3. SCHEMI PYDANTIC ---
-
-# NUOVI SCHEMI PER LA REGISTRAZIONE
+# --- SCHEMI PYDANTIC ---
 class UtenteCreate(BaseModel):
     nome: str
+    email: EmailStr
+    password: str
+
+class UtenteLogin(BaseModel):
     email: EmailStr
     password: str
 
@@ -86,6 +99,10 @@ class UtenteResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
 
 class ArticoloCarrello(BaseModel):
     prodottoId: int
@@ -100,21 +117,20 @@ class OrdineCreate(BaseModel):
     carrello: List[ArticoloCarrello]
 
 
-# --- 4. INIZIALIZZAZIONE FASTAPI ---
+# --- INIZIALIZZAZIONE FASTAPI ---
 app = FastAPI(title="CNL Shop API")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
-        "https://simonedelpapa.github.io" # Il tuo URL futuro di GitHub Pages
+        "https://simonedelpapa.github.io"
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Dipendenza per ottenere la sessione del DB
 def get_db():
     db = SessionLocal()
     try:
@@ -123,12 +139,10 @@ def get_db():
         db.close()
 
 
-# --- 5. ROTTE API ---
+# --- ROTTE API ---
 
-# NUOVA ROTTA: Registrazione Utente
 @app.post("/api/register", response_model=UtenteResponse, status_code=status.HTTP_201_CREATED)
 def registra_utente(utente: UtenteCreate, db: Session = Depends(get_db)):
-    # Controlla se l'email esiste già
     db_user = db.query(Utente).filter(Utente.email == utente.email).first()
     if db_user:
         raise HTTPException(
@@ -136,7 +150,6 @@ def registra_utente(utente: UtenteCreate, db: Session = Depends(get_db)):
             detail="Email già registrata"
         )
     
-    # Cripta la password e salva l'utente
     hashed_pwd = get_password_hash(utente.password)
     nuovo_utente = Utente(
         email=utente.email,
@@ -147,8 +160,34 @@ def registra_utente(utente: UtenteCreate, db: Session = Depends(get_db)):
     db.add(nuovo_utente)
     db.commit()
     db.refresh(nuovo_utente)
-    
     return nuovo_utente
+
+
+@app.post("/api/login")
+def login_utente(credenziali: UtenteLogin, db: Session = Depends(get_db)):
+    # Cerca l'utente
+    utente = db.query(Utente).filter(Utente.email == credenziali.email).first()
+    
+    # Verifica esistenza e password
+    if not utente or not verify_password(credenziali.password, utente.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Email o password errati",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    # Genera Token
+    access_token = create_access_token(data={"sub": str(utente.id)})
+    
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "utente": {
+            "id": utente.id,
+            "email": utente.email,
+            "nome": utente.nome
+        }
+    }
 
 
 @app.get("/api/products")

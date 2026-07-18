@@ -3,6 +3,9 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./componen
 import { Button } from "./components/ui/Button"
 import { Badge } from "./components/ui/Badge"
 
+// --- 1. IMPORTA IL NUOVO COMPONENTE AUTH ---
+import Auth from './Auth'
+
 // 1. COMPONENTE PER IL SINGOLO PRODOTTO
 function ProdottoCard({ prodotto, onAggiungi }) {
   const [atleta, setAtleta] = useState('')
@@ -99,6 +102,9 @@ function ProdottoCard({ prodotto, onAggiungi }) {
 
 // 2. APPLICAZIONE PRINCIPALE
 export default function App() {
+  // --- 2. NUOVO STATO PER L'UTENTE LOGGATO ---
+  const [utenteLoggato, setUtenteLoggato] = useState(null)
+
   const [prodotti, setProdotti] = useState([])
   const [carrello, setCarrello] = useState([])
   const [loading, setLoading] = useState(true)
@@ -106,7 +112,6 @@ export default function App() {
   const [isCheckout, setIsCheckout] = useState(false) 
 
   useEffect(() => {
-    // CORRETTO: Aggiunto /api/products alla fine dell'URL
     fetch('https://cnl-shop-backend.onrender.com/api/products')
       .then(res => {
         if (!res.ok) throw new Error("Errore server")
@@ -117,6 +122,7 @@ export default function App() {
         setLoading(false)
       })
       .catch(err => {
+        console.error("ERRORE DI RETE:", err)
         setErrore("Impossibile collegarsi al backend.")
         setLoading(false)
       })
@@ -135,7 +141,6 @@ export default function App() {
   const gestisciCheckout = async () => {
     setIsCheckout(true)
     try {
-      // CORRETTO: Sostituito localhost con l'URL di Render
       const response = await fetch('https://cnl-shop-backend.onrender.com/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -159,15 +164,38 @@ export default function App() {
     }
   }
 
+  // --- 3. SE L'UTENTE NON E' LOGGATO, MOSTRA IL COMPONENTE AUTH ---
+  if (!utenteLoggato) {
+    return (
+      <div className="font-sans text-white antialiased">
+        <Auth onLoginSuccess={(datiUtente) => setUtenteLoggato(datiUtente)} />
+      </div>
+    )
+  }
+
+  // --- 4. SE E' LOGGATO, MOSTRA IL NEGOZIO ---
   return (
     <div className="min-h-screen p-6 md:p-12 font-sans text-white antialiased">
-      <header className="max-w-5xl mx-auto bg-white/10 backdrop-blur-xl border border-white/20 p-8 rounded-3xl shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] mb-10 text-center">
+      <header className="max-w-5xl mx-auto bg-white/10 backdrop-blur-xl border border-white/20 p-8 rounded-3xl shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] mb-10 text-center relative">
         <h1 className="text-4xl md:text-5xl font-black tracking-wider uppercase bg-gradient-to-r from-white via-blue-100 to-blue-200 bg-clip-text text-transparent drop-shadow-sm">
           CNL Shop
         </h1>
         <p className="mt-3 text-blue-200/80 text-lg md:text-xl font-medium">
           Circolo Nuoto Lucca - Ordini Abbigliamento Sportivo
         </p>
+        
+        {/* Pulsante per fare il Logout */}
+        <div className="mt-6 pt-4 border-t border-white/10 flex justify-center items-center gap-4">
+          <p className="text-sm text-white/70">
+            Accesso effettuato come <strong className="text-white">{utenteLoggato.email || 'Utente'}</strong>
+          </p>
+          <button 
+            onClick={() => setUtenteLoggato(null)}
+            className="text-xs bg-red-500/20 hover:bg-red-500/40 text-red-200 border border-red-500/30 px-3 py-1 rounded-full transition-colors"
+          >
+            Esci
+          </button>
+        </div>
       </header>
       
       <main className="max-w-5xl mx-auto">
