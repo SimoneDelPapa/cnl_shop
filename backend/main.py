@@ -2,6 +2,10 @@ import os
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+
+# Aggiungi 'create_engine' all'inizio dell'elenco
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session
 # ... altri import ...
 
 # Carica le variabili dal file .env se siamo in locale
