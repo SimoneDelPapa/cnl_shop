@@ -1,13 +1,14 @@
 import os
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
-# --- IMPORT AGGIUNTI (Risolvono l'errore NameError) ---
-from pydantic import BaseModel
+# --- IMPORT AGGIUNTI PER LA REGISTRAZIONE ---
+from pydantic import BaseModel, EmailStr
 from typing import List, Optional
+from passlib.context import CryptContext
 
-from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session
 
 # Carica le variabili dal file .env se siamo in locale
@@ -27,7 +28,23 @@ engine = create_engine(SQLALCHEMY_DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
-# 2. MODELLI DATABASE (Tabelle)
+# --- CONFIGURAZIONE PASSWORD HASHING ---
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def get_password_hash(password: str):
+    return pwd_context.hash(password)
+
+# --- 2. MODELLI DATABASE (Tabelle) ---
+
+# NUOVO MODELLO: Tabella Utenti
+class Utente(Base):
+    __tablename__ = "utenti"
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    nome = Column(String, nullable=False)
+    hashed_password = Column(String, nullable=False)
+    is_attivo = Column(Boolean, default=True)
+
 class Ordine(Base):
     __tablename__ = "ordini"
     id = Column(Integer, primary_key=True, index=True)
@@ -49,10 +66,27 @@ class ArticoloOrdine(Base):
 
     ordine = relationship("Ordine", back_populates="articoli")
 
-# Crea le tabelle nel database
+# Crea le tabelle nel database (creerà in automatico la nuova tabella 'utenti')
 Base.metadata.create_all(bind=engine)
 
-# 3. SCHEMI PYDANTIC (Per validare i dati in arrivo da React)
+
+# --- 3. SCHEMI PYDANTIC ---
+
+# NUOVI SCHEMI PER LA REGISTRAZIONE
+class UtenteCreate(BaseModel):
+    nome: str
+    email: EmailStr
+    password: str
+
+class UtenteResponse(BaseModel):
+    id: int
+    email: EmailStr
+    nome: str
+    is_attivo: bool
+
+    class Config:
+        from_attributes = True
+
 class ArticoloCarrello(BaseModel):
     prodottoId: int
     nomeProdotto: str
@@ -65,7 +99,8 @@ class OrdineCreate(BaseModel):
     totale: float
     carrello: List[ArticoloCarrello]
 
-# 4. INIZIALIZZAZIONE FASTAPI
+
+# --- 4. INIZIALIZZAZIONE FASTAPI ---
 app = FastAPI(title="CNL Shop API")
 
 app.add_middleware(
@@ -87,7 +122,34 @@ def get_db():
     finally:
         db.close()
 
-# --- ROTTE API ---
+
+# --- 5. ROTTE API ---
+
+# NUOVA ROTTA: Registrazione Utente
+@app.post("/api/register", response_model=UtenteResponse, status_code=status.HTTP_201_CREATED)
+def registra_utente(utente: UtenteCreate, db: Session = Depends(get_db)):
+    # Controlla se l'email esiste già
+    db_user = db.query(Utente).filter(Utente.email == utente.email).first()
+    if db_user:
+        raise HTTPException(
+            status_code=400, 
+            detail="Email già registrata"
+        )
+    
+    # Cripta la password e salva l'utente
+    hashed_pwd = get_password_hash(utente.password)
+    nuovo_utente = Utente(
+        email=utente.email,
+        nome=utente.nome,
+        hashed_password=hashed_pwd
+    )
+    
+    db.add(nuovo_utente)
+    db.commit()
+    db.refresh(nuovo_utente)
+    
+    return nuovo_utente
+
 
 @app.get("/api/products")
 def get_products():
@@ -101,13 +163,11 @@ def get_products():
 @app.post("/api/orders")
 def crea_ordine(ordine_in: OrdineCreate, db: Session = Depends(get_db)):
     try:
-        # Crea l'ordine principale
         nuovo_ordine = Ordine(totale=ordine_in.totale)
         db.add(nuovo_ordine)
         db.commit()
         db.refresh(nuovo_ordine)
         
-        # Aggiunge gli articoli collegandoli all'ID dell'ordine
         for item in ordine_in.carrello:
             nuovo_articolo = ArticoloOrdine(
                 ordine_id=nuovo_ordine.id,
