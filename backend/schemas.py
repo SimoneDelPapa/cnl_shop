@@ -15,8 +15,6 @@ class UtenteResponse(BaseModel):
 
     class Config:
         orm_mode = True # Per Pydantic v1 (usa model_config = {'from_attributes': True} per Pydantic v2)
-        
-# --- NUOVI SCHEMI PER IL LOGIN ---
 
 # Dati inviati da React per fare il login (potresti anche usare OAuth2PasswordRequestForm di FastAPI, 
 # ma un JSON semplice è più comodo per React)

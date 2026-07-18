@@ -2,6 +2,7 @@ import os
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer # <-- AGGIUNTO per proteggere le rotte
 from dotenv import load_dotenv
 
 from pydantic import BaseModel, EmailStr
@@ -12,10 +13,8 @@ import jwt
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session
 
-# Carica le variabili dal file .env se siamo in locale
 load_dotenv()
 
-# Prende la variabile d'ambiente
 SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
 
 if not SQLALCHEMY_DATABASE_URL:
@@ -30,11 +29,12 @@ Base = declarative_base()
 
 # --- CONFIGURAZIONE PASSWORD HASHING E JWT ---
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
-# Chiave segreta per i JWT (in produzione andrebbe messa nel file .env)
 SECRET_KEY = os.getenv("SECRET_KEY", "chiave_segreta_super_sicura_da_cambiare_in_produzione")
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # Il token scade in 7 giorni
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
+
+# Indica a FastAPI dove il frontend deve prendere il token
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
 
 def get_password_hash(password: str):
     return pwd_context.hash(password)
@@ -63,6 +63,8 @@ class Ordine(Base):
     id = Column(Integer, primary_key=True, index=True)
     totale = Column(Float, nullable=False)
     stato_pagamento = Column(String, default="In attesa")
+    # Aggiunto il collegamento all'utente (nullable=True per non rompere ordini vecchi nel DB)
+    utente_id = Column(Integer, ForeignKey("utenti.id"), nullable=True) 
     
     articoli = relationship("ArticoloOrdine", back_populates="ordine")
 
@@ -116,7 +118,6 @@ class OrdineCreate(BaseModel):
     totale: float
     carrello: List[ArticoloCarrello]
 
-
 # --- INIZIALIZZAZIONE FASTAPI ---
 app = FastAPI(title="CNL Shop API")
 
@@ -138,6 +139,27 @@ def get_db():
     finally:
         db.close()
 
+# --- DIPENDENZA: Verifica chi è l'utente loggato ---
+def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Credenziali non valide",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        # Usa PyJWT per decodificare il token
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+    except jwt.PyJWTError: # Gestisce le eccezioni di PyJWT (scaduto o falso)
+        raise credentials_exception
+    
+    user = db.query(Utente).filter(Utente.id == int(user_id)).first()
+    if user is None:
+        raise credentials_exception
+    return user
+
 
 # --- ROTTE API ---
 
@@ -145,17 +167,10 @@ def get_db():
 def registra_utente(utente: UtenteCreate, db: Session = Depends(get_db)):
     db_user = db.query(Utente).filter(Utente.email == utente.email).first()
     if db_user:
-        raise HTTPException(
-            status_code=400, 
-            detail="Email già registrata"
-        )
+        raise HTTPException(status_code=400, detail="Email già registrata")
     
     hashed_pwd = get_password_hash(utente.password)
-    nuovo_utente = Utente(
-        email=utente.email,
-        nome=utente.nome,
-        hashed_password=hashed_pwd
-    )
+    nuovo_utente = Utente(email=utente.email, nome=utente.nome, hashed_password=hashed_pwd)
     
     db.add(nuovo_utente)
     db.commit()
@@ -165,10 +180,8 @@ def registra_utente(utente: UtenteCreate, db: Session = Depends(get_db)):
 
 @app.post("/api/login")
 def login_utente(credenziali: UtenteLogin, db: Session = Depends(get_db)):
-    # Cerca l'utente
     utente = db.query(Utente).filter(Utente.email == credenziali.email).first()
     
-    # Verifica esistenza e password
     if not utente or not verify_password(credenziali.password, utente.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -176,17 +189,12 @@ def login_utente(credenziali: UtenteLogin, db: Session = Depends(get_db)):
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Genera Token
     access_token = create_access_token(data={"sub": str(utente.id)})
     
     return {
         "access_token": access_token, 
         "token_type": "bearer",
-        "utente": {
-            "id": utente.id,
-            "email": utente.email,
-            "nome": utente.nome
-        }
+        "utente": {"id": utente.id, "email": utente.email, "nome": utente.nome}
     }
 
 
@@ -199,10 +207,12 @@ def get_products():
         {"id": 4, "nome": "Cuffia in silicone", "prezzo": 8.00, "personalizzabile": False}
     ]
 
+# ROTTA PROTETTA: Ora richiede il token per salvare l'ordine
 @app.post("/api/orders")
-def crea_ordine(ordine_in: OrdineCreate, db: Session = Depends(get_db)):
+def crea_ordine(ordine_in: OrdineCreate, db: Session = Depends(get_db), current_user: Utente = Depends(get_current_user)):
     try:
-        nuovo_ordine = Ordine(totale=ordine_in.totale)
+        # Associa l'ordine all'utente appena trovato tramite il token
+        nuovo_ordine = Ordine(totale=ordine_in.totale, utente_id=current_user.id)
         db.add(nuovo_ordine)
         db.commit()
         db.refresh(nuovo_ordine)

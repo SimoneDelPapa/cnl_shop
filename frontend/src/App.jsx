@@ -141,9 +141,15 @@ export default function App() {
   const gestisciCheckout = async () => {
     setIsCheckout(true)
     try {
+      // 1. Recuperiamo il token salvato al momento del login
+      const token = localStorage.getItem('token'); 
+
       const response = await fetch('https://cnl-shop-backend.onrender.com/api/orders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` // 2. Alleghiamo il token alla richiesta!
+        },
         body: JSON.stringify({
           totale: totaleCarrello,
           carrello: carrello
@@ -158,7 +164,7 @@ export default function App() {
       setCarrello([]); 
     } catch (error) {
       console.error("Errore:", error);
-      alert("❌ Errore di connessione. Verifica che il backend sia acceso.");
+      alert("❌ Errore di connessione o utente non autorizzato.");
     } finally {
       setIsCheckout(false)
     }
