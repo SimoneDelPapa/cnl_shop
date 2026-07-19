@@ -2,8 +2,6 @@ import { useState, useEffect } from 'react'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./components/ui/Card"
 import { Button } from "./components/ui/Button"
 import { Badge } from "./components/ui/Badge"
-
-// --- 1. IMPORTA IL NUOVO COMPONENTE AUTH ---
 import Auth from './Auth'
 
 // 1. COMPONENTE PER IL SINGOLO PRODOTTO
@@ -102,9 +100,7 @@ function ProdottoCard({ prodotto, onAggiungi }) {
 
 // 2. APPLICAZIONE PRINCIPALE
 export default function App() {
-  // --- 2. NUOVO STATO PER L'UTENTE LOGGATO ---
   const [utenteLoggato, setUtenteLoggato] = useState(null)
-
   const [prodotti, setProdotti] = useState([])
   const [carrello, setCarrello] = useState([])
   const [loading, setLoading] = useState(true)
@@ -112,20 +108,49 @@ export default function App() {
   const [isCheckout, setIsCheckout] = useState(false) 
 
   useEffect(() => {
-    fetch('https://cnl-shop-backend.onrender.com/api/products')
+    // SPOSTATO QUI DENTRO: la funzione ora è dichiarata prima di essere usata
+    const caricaProdotti = () => {
+      fetch('https://cnl-shop-backend.onrender.com/api/products')
+        .then(res => {
+          if (!res.ok) throw new Error("Errore server")
+          return res.json()
+        })
+        .then(data => {
+          setProdotti(data)
+          setLoading(false)
+        })
+        .catch(err => {
+          console.error("ERRORE DI RETE:", err)
+          setErrore("Impossibile collegarsi al backend.")
+          setLoading(false)
+        })
+    }
+
+    const token = localStorage.getItem('token')
+    
+    if (token) {
+      // Verifica token esistente
+      fetch('https://cnl-shop-backend.onrender.com/api/users/me', {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${token}` }
+      })
       .then(res => {
-        if (!res.ok) throw new Error("Errore server")
+        if (!res.ok) throw new Error("Token scaduto o non valido")
         return res.json()
       })
-      .then(data => {
-        setProdotti(data)
-        setLoading(false)
+      .then(datiUtente => {
+        setUtenteLoggato(datiUtente)
       })
       .catch(err => {
-        console.error("ERRORE DI RETE:", err)
-        setErrore("Impossibile collegarsi al backend.")
-        setLoading(false)
+        console.warn("Sessione scaduta:", err.message)
+        localStorage.removeItem('token')
       })
+      .finally(() => {
+        caricaProdotti()
+      })
+    } else {
+      caricaProdotti()
+    }
   }, [])
 
   const aggiungiAlCarrello = (item) => {
@@ -141,14 +166,13 @@ export default function App() {
   const gestisciCheckout = async () => {
     setIsCheckout(true)
     try {
-      // 1. Recuperiamo il token salvato al momento del login
       const token = localStorage.getItem('token'); 
 
       const response = await fetch('https://cnl-shop-backend.onrender.com/api/orders', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}` // 2. Alleghiamo il token alla richiesta!
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
           totale: totaleCarrello,
@@ -164,13 +188,28 @@ export default function App() {
       setCarrello([]); 
     } catch (error) {
       console.error("Errore:", error);
-      alert("❌ Errore di connessione o utente non autorizzato.");
+      alert("❌ Errore di connessione o sessione scaduta. Riprova a fare l'accesso.");
     } finally {
       setIsCheckout(false)
     }
   }
 
-  // --- 3. SE L'UTENTE NON E' LOGGATO, MOSTRA IL COMPONENTE AUTH ---
+  // Cancella il token ed esegue il logout
+  const gestisciLogout = () => {
+    localStorage.removeItem('token')
+    setUtenteLoggato(null)
+  }
+
+  // Schermata di caricamento unificata
+  if (loading && !errore) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center">
+        <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-white mb-4"></div>
+        <p className="text-white/70 font-semibold tracking-wide animate-pulse">Caricamento in corso...</p>
+      </div>
+    )
+  }
+
   if (!utenteLoggato) {
     return (
       <div className="font-sans text-white antialiased">
@@ -179,7 +218,6 @@ export default function App() {
     )
   }
 
-  // --- 4. SE E' LOGGATO, MOSTRA IL NEGOZIO ---
   return (
     <div className="min-h-screen p-6 md:p-12 font-sans text-white antialiased">
       <header className="max-w-5xl mx-auto bg-white/10 backdrop-blur-xl border border-white/20 p-8 rounded-3xl shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] mb-10 text-center relative">
@@ -190,14 +228,13 @@ export default function App() {
           Circolo Nuoto Lucca - Ordini Abbigliamento Sportivo
         </p>
         
-        {/* Pulsante per fare il Logout */}
-        <div className="mt-6 pt-4 border-t border-white/10 flex justify-center items-center gap-4">
+        <div className="mt-6 pt-4 border-t border-white/10 flex flex-col md:flex-row justify-center items-center gap-4">
           <p className="text-sm text-white/70">
-            Accesso effettuato come <strong className="text-white">{utenteLoggato.email || 'Utente'}</strong>
+            Accesso effettuato come <strong className="text-white">{utenteLoggato.nome}</strong> ({utenteLoggato.email})
           </p>
           <button 
-            onClick={() => setUtenteLoggato(null)}
-            className="text-xs bg-red-500/20 hover:bg-red-500/40 text-red-200 border border-red-500/30 px-3 py-1 rounded-full transition-colors"
+            onClick={gestisciLogout}
+            className="text-xs bg-red-500/20 hover:bg-red-500/40 text-red-200 border border-red-500/30 px-4 py-1.5 rounded-full transition-colors font-bold uppercase tracking-wider"
           >
             Esci
           </button>
@@ -207,9 +244,7 @@ export default function App() {
       <main className="max-w-5xl mx-auto">
         <h2 className="text-3xl font-bold text-white/90 tracking-wide mb-8 border-b border-white/10 pb-4">Catalogo</h2>
         
-        {loading ? (
-           <div className="flex justify-center p-10"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white"></div></div>
-        ) : errore ? (
+        {errore ? (
            <div className="bg-red-500/20 backdrop-blur-md border border-red-500/30 p-4 rounded-xl text-red-200">{errore}</div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">

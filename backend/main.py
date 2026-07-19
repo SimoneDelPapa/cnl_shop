@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 import jwt
-import bcrypt  # <-- Importiamo bcrypt nativo al posto di passlib
+import bcrypt  
 
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session
@@ -198,6 +198,12 @@ def login_utente(credenziali: UtenteLogin, db: Session = Depends(get_db)):
         "token_type": "bearer",
         "utente": {"id": utente.id, "email": utente.email, "nome": utente.nome}
     }
+
+
+# NUOVA ROTTA: Recupera i dati dell'utente dal token
+@app.get("/api/users/me", response_model=UtenteResponse)
+def ottieni_utente_corrente(current_user: Utente = Depends(get_current_user)):
+    return current_user
 
 
 @app.get("/api/products")
