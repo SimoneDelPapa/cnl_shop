@@ -11,7 +11,7 @@ import jwt
 import bcrypt  
 
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, Boolean
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session, joinedload
 
 load_dotenv()
 
@@ -200,7 +200,6 @@ def login_utente(credenziali: UtenteLogin, db: Session = Depends(get_db)):
     }
 
 
-# NUOVA ROTTA: Recupera i dati dell'utente dal token
 @app.get("/api/users/me", response_model=UtenteResponse)
 def ottieni_utente_corrente(current_user: Utente = Depends(get_current_user)):
     return current_user
@@ -241,3 +240,32 @@ def crea_ordine(ordine_in: OrdineCreate, db: Session = Depends(get_db), current_
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+
+# NUOVA ROTTA: Recupera lo storico ordini dell'utente loggato
+@app.get("/api/orders/my-orders")
+def ottieni_ordini_utente(db: Session = Depends(get_db), current_user: Utente = Depends(get_current_user)):
+    ordini = db.query(Ordine)\
+               .filter(Ordine.utente_id == current_user.id)\
+               .options(joinedload(Ordine.articoli))\
+               .order_by(Ordine.id.desc())\
+               .all()
+    
+    risposta = []
+    for o in ordini:
+        risposta.append({
+            "id": o.id,
+            "totale": o.totale,
+            "stato_pagamento": o.stato_pagamento,
+            "articoli": [
+                {
+                    "prodotto_id": art.prodotto_id,
+                    "nome_prodotto": art.nome_prodotto,
+                    "prezzo": art.prezzo,
+                    "atleta": art.atleta,
+                    "taglia": art.taglia,
+                    "nome_personalizzato": art.nome_personalizzato
+                } for art in o.articoli
+            ]
+        })
+    
+    return risposta

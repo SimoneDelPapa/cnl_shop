@@ -103,12 +103,12 @@ export default function App() {
   const [utenteLoggato, setUtenteLoggato] = useState(null)
   const [prodotti, setProdotti] = useState([])
   const [carrello, setCarrello] = useState([])
+  const [ordiniUtente, setOrdiniUtente] = useState([])
   const [loading, setLoading] = useState(true)
   const [errore, setErrore] = useState(null)
   const [isCheckout, setIsCheckout] = useState(false) 
 
   useEffect(() => {
-    // SPOSTATO QUI DENTRO: la funzione ora è dichiarata prima di essere usata
     const caricaProdotti = () => {
       fetch('https://cnl-shop-backend.onrender.com/api/products')
         .then(res => {
@@ -126,10 +126,21 @@ export default function App() {
         })
     }
 
+    const caricaOrdiniUtente = (tokenFisico) => {
+      fetch('https://cnl-shop-backend.onrender.com/api/orders/my-orders', {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${tokenFisico}` }
+      })
+      .then(res => res.json())
+      .then(data => {
+        setOrdiniUtente(data)
+      })
+      .catch(err => console.error("Errore nel caricamento ordini storici:", err))
+    }
+
     const token = localStorage.getItem('token')
     
     if (token) {
-      // Verifica token esistente
       fetch('https://cnl-shop-backend.onrender.com/api/users/me', {
         method: 'GET',
         headers: { 'Authorization': `Bearer ${token}` }
@@ -140,6 +151,7 @@ export default function App() {
       })
       .then(datiUtente => {
         setUtenteLoggato(datiUtente)
+        caricaOrdiniUtente(token)
       })
       .catch(err => {
         console.warn("Sessione scaduta:", err.message)
@@ -186,6 +198,16 @@ export default function App() {
       alert(`✅ Ordine #${data.ordine_id} salvato correttamente nel database!\n\nTotale: €${totaleCarrello.toFixed(2)}`);
       
       setCarrello([]); 
+
+      const aggiornaOrdini = await fetch('https://cnl-shop-backend.onrender.com/api/orders/my-orders', {
+        method: 'GET',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (aggiornaOrdini.ok) {
+        const nuoviOrdini = await aggiornaOrdini.json();
+        setOrdiniUtente(nuoviOrdini);
+      }
+      
     } catch (error) {
       console.error("Errore:", error);
       alert("❌ Errore di connessione o sessione scaduta. Riprova a fare l'accesso.");
@@ -194,13 +216,12 @@ export default function App() {
     }
   }
 
-  // Cancella il token ed esegue il logout
   const gestisciLogout = () => {
     localStorage.removeItem('token')
     setUtenteLoggato(null)
+    setOrdiniUtente([])
   }
 
-  // Schermata di caricamento unificata
   if (loading && !errore) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center">
@@ -213,7 +234,16 @@ export default function App() {
   if (!utenteLoggato) {
     return (
       <div className="font-sans text-white antialiased">
-        <Auth onLoginSuccess={(datiUtente) => setUtenteLoggato(datiUtente)} />
+        <Auth onLoginSuccess={(datiUtente) => {
+          setUtenteLoggato(datiUtente)
+          const t = localStorage.getItem('token')
+          if(t) {
+            fetch('https://cnl-shop-backend.onrender.com/api/orders/my-orders', {
+              method: 'GET',
+              headers: { 'Authorization': `Bearer ${t}` }
+            }).then(r => r.json()).then(d => setOrdiniUtente(d))
+          }
+        }} />
       </div>
     )
   }
@@ -256,7 +286,7 @@ export default function App() {
 
         {carrello.length > 0 && (
           <div className="mt-16 bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-8 shadow-2xl">
-            <h2 className="text-2xl font-bold text-white mb-6">Il tuo ordine</h2>
+            <h2 className="text-2xl font-bold text-white mb-6">Il tuo ordine attuale</h2>
             
             <div className="space-y-4 mb-8">
               {carrello.map((item) => (
@@ -295,6 +325,60 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* --- STORICO ORDINI --- */}
+        <div className="mt-20 border-t border-white/10 pt-10">
+          <h2 className="text-3xl font-bold text-white/90 tracking-wide mb-8">I Miei Ordini Inviati</h2>
+          
+          {ordiniUtente.length === 0 ? (
+            <p className="text-white/50 text-center py-8 italic bg-white/5 border border-white/10 rounded-2xl">
+              Non hai ancora inviato nessun ordine per questa stagione.
+            </p>
+          ) : (
+            <div className="space-y-6">
+              {ordiniUtente.map((ord) => (
+                <div key={ord.id} className="bg-white/5 border border-white/10 rounded-2xl p-6 shadow-md hover:border-white/20 transition-all">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-white/10 pb-4 mb-4 gap-2">
+                    <div>
+                      <span className="text-xs text-white/50 uppercase tracking-widest font-semibold">Identificativo</span>
+                      <h3 className="text-xl font-bold text-blue-200">Ordine #{ord.id}</h3>
+                    </div>
+                    <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end">
+                      <div className="text-right">
+                        <span className="text-xs text-white/50 block">Importo totale</span>
+                        <span className="font-black text-lg">€{ord.totale.toFixed(2)}</span>
+                      </div>
+                      <Badge className={`px-3 py-1 text-xs rounded-full border ${
+                        ord.stato_pagamento === 'In attesa' 
+                          ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' 
+                          : 'bg-green-500/20 text-green-300 border-green-500/30'
+                      }`}>
+                        {ord.stato_pagamento}
+                      </Badge>
+                    </div>
+                  </div>
+
+                  <div className="divide-y divide-white/5 space-y-3">
+                    {ord.articoli.map((art, idx) => (
+                      <div key={idx} className="pt-3 first:pt-0 flex justify-between items-center text-sm">
+                        <div>
+                          <p className="font-bold text-white/90">{art.nome_prodotto} <span className="text-xs text-white/40 font-normal">({art.taglia})</span></p>
+                          <p className="text-xs text-white/60">
+                            Destinatario: <span className="text-white font-semibold">{art.atleta}</span>
+                            {art.nome_personalizzato && (
+                              <span> | Stampa: <span className="text-cyan-400 font-bold">"{art.nome_personalizzato}"</span></span>
+                            )}
+                          </p>
+                        </div>
+                        <span className="font-semibold text-white/80">€{art.prezzo.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </main>
     </div>
   )
