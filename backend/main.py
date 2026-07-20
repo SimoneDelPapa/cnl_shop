@@ -74,7 +74,7 @@ class Prodotto(Base):
     nome = Column(String, nullable=False)
     prezzo = Column(Float, nullable=False)
     personalizzabile = Column(Boolean, default=False)
-    immagine_url = Column(String, nullable=True) # <-- NUOVA COLONNA PER IL FILE PNG/JPG
+    immagine_url = Column(String, nullable=True) 
 
 class Ordine(Base):
     __tablename__ = "ordini"
@@ -156,12 +156,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Creazione sicura della cartella uploads locale all'avvio
 UPLOAD_DIR = "uploads"
 if not os.path.exists(UPLOAD_DIR):
     os.makedirs(UPLOAD_DIR)
 
-# ESPONIAMO LA CARTELLA STRUTTURATA PER LE IMMAGINI DEL CATALOGO
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 def get_db():
@@ -303,7 +301,8 @@ def admin_esporta_csv(db: Session = Depends(get_db), admin_user: Utente = Depend
     writer = csv.writer(output)
     writer.writerow(["ID Ordine", "Acquirente", "Prodotto", "Taglia", "Nome Atleta", "Testo Personalizzato", "Prezzo", "Stato Pagamento"])
     
-    for art in articles:
+    # 🌟 CORRETTO: "articles" riallineato alla variabile "articoli" in italiano
+    for art in articoli:
         ordine = art.ordine
         acquirente = ordine.utente.nome if ordine.utente else "Sconosciuto"
         writer.writerow([ordine.id, acquirente, art.nome_prodotto, art.taglia, art.atleta, art.nome_personalizzato or "", f"{art.prezzo:.2f}", ordine.stato_pagamento])
@@ -311,7 +310,6 @@ def admin_esporta_csv(db: Session = Depends(get_db), admin_user: Utente = Depend
     output.seek(0)
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=ordini_cnl_shop.csv"})
 
-# MODIFICATO: Accetta dati via Form data + File per l'immagine PNG
 @app.post("/api/admin/products", response_model=ProdottoResponse)
 def admin_crea_prodotto(
     nome: str = Form(...),
@@ -323,7 +321,6 @@ def admin_crea_prodotto(
 ):
     saved_file_url = None
     if file:
-        # Generiamo un nome file pulito basato sul timestamp per evitare duplicati
         timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
         filename = f"{timestamp}_{file.filename.replace(' ', '_')}"
         file_path = os.path.join(UPLOAD_DIR, filename)
@@ -345,7 +342,6 @@ def admin_elimina_prodotto(prodotto_id: int, db: Session = Depends(get_db), admi
     if not prodotto:
         raise HTTPException(status_code=404, detail="Prodotto non trovato")
     
-    # Se presente, rimuove fisicamente anche il file png locale per non intasare l'hard disk
     if prodotto.immagine_url:
         filename = prodotto.immagine_url.split("/")[-1]
         local_path = os.path.join(UPLOAD_DIR, filename)
