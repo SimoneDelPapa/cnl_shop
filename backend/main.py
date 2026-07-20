@@ -14,6 +14,9 @@ from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 import jwt
 import bcrypt  
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session, joinedload
@@ -117,7 +120,6 @@ class UtenteResponse(BaseModel):
     nome: str
     is_attivo: bool
     is_admin: bool 
-
     class Config:
         from_attributes = True
 
@@ -144,6 +146,14 @@ class OrdineCreate(BaseModel):
 
 class UpdateStatoOrdine(BaseModel):
     stato_pagamento: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    nuova_password: str
+
 
 # --- INIZIALIZZAZIONE FASTAPI ---
 app = FastAPI(title="CNL Shop API")
@@ -194,7 +204,7 @@ def get_current_admin(current_user: Utente = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Accesso negato. Solo Staff.")
     return current_user
 
-# --- ROTTE API UTENTI & ORDINI ---
+# --- ROTTE API UTENTI, RECUPERO PASSWORD & ORDINI ---
 
 @app.post("/api/register", response_model=UtenteResponse, status_code=status.HTTP_201_CREATED)
 def registra_utente(utente: UtenteCreate, db: Session = Depends(get_db)):
@@ -226,6 +236,45 @@ def login_utente(credenziali: UtenteLogin, db: Session = Depends(get_db)):
 @app.get("/api/users/me", response_model=UtenteResponse)
 def ottieni_utente_corrente(current_user: Utente = Depends(get_current_user)):
     return current_user
+
+@app.post("/api/forgot-password")
+def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    utente = db.query(Utente).filter(Utente.email == req.email).first()
+    if not utente:
+        return {"messaggio": "Ok"} # Risposta fittizia di sicurezza
+
+    expire = datetime.utcnow() + timedelta(minutes=15)
+    reset_token = jwt.encode({"sub": str(utente.id), "type": "reset", "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
+    
+    link_reset = f"https://simonedelpapa.github.io/cnl_shop/?reset={reset_token}"
+    
+    print("\n" + "="*40)
+    print(f"🔗 LINK DI RESET PER {utente.email}:")
+    print(link_reset)
+    print("="*40 + "\n")
+
+    return {"messaggio": "Ok"}
+
+@app.post("/api/reset-password")
+def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
+    try:
+        payload = jwt.decode(req.token, SECRET_KEY, algorithms=[ALGORITHM])
+        if payload.get("type") != "reset":
+            raise HTTPException(status_code=400, detail="Token non valido.")
+        user_id = payload.get("sub")
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=400, detail="Il link è scaduto. Richiedine uno nuovo.")
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=400, detail="Il link non è valido.")
+
+    utente = db.query(Utente).filter(Utente.id == int(user_id)).first()
+    if not utente:
+        raise HTTPException(status_code=404, detail="Utente non trovato")
+
+    utente.hashed_password = get_password_hash(req.nuova_password)
+    db.commit()
+
+    return {"messaggio": "Password modificata con successo"}
 
 @app.get("/api/products", response_model=List[ProdottoResponse])
 def get_products(db: Session = Depends(get_db)):
@@ -301,7 +350,6 @@ def admin_esporta_csv(db: Session = Depends(get_db), admin_user: Utente = Depend
     writer = csv.writer(output)
     writer.writerow(["ID Ordine", "Acquirente", "Prodotto", "Taglia", "Nome Atleta", "Testo Personalizzato", "Prezzo", "Stato Pagamento"])
     
-    # 🌟 CORRETTO: "articles" riallineato alla variabile "articoli" in italiano
     for art in articoli:
         ordine = art.ordine
         acquirente = ordine.utente.nome if ordine.utente else "Sconosciuto"
