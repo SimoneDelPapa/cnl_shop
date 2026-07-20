@@ -170,7 +170,7 @@ export default function App() {
           setUtenteLoggato(datiUtente);
           
           if (datiUtente.is_admin) {
-            setViewAdmin(true); // Reindirizza l'admin al pannello staff all'avvio
+            setViewAdmin(true);
             await caricaOrdiniGlobaliAdmin(token);
           } else {
             await caricaOrdiniUtente(token);
@@ -201,6 +201,30 @@ export default function App() {
       console.error(err); 
     }
   }, [caricaOrdiniGlobaliAdmin]);
+
+  // --- NUOVA FUNZIONE: ESPORTA CSV ---
+  const esportaCsvAdmin = async () => {
+    const token = localStorage.getItem('token');
+    try {
+      const response = await fetch('https://cnl-shop-backend.onrender.com/api/admin/export-csv', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!response.ok) throw new Error("Errore durante l'esportazione");
+      
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'ordini_cnl_shop.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error(err);
+      alert("❌ Impossibile scaricare il file CSV.");
+    }
+  };
 
   const aggiungiAlCarrello = (item) => setCarrello(prev => [...prev, item]);
   const rimuoviDalCarrello = (idUnivoco) => setCarrello(prev => prev.filter(item => item.idUnivoco !== idUnivoco));
@@ -304,13 +328,12 @@ export default function App() {
                     key={prodotto.id} 
                     prodotto={prodotto} 
                     onAggiungi={aggiungiAlCarrello} 
-                    isUserAdmin={utenteLoggato.is_admin} /* Passiamo l'informazione alla tessera! */
+                    isUserAdmin={utenteLoggato.is_admin} 
                   />
                 ))}
               </div>
             )}
 
-            {/* IL CARRELLO NON VIENE MOSTRATO AGLI ADMIN */}
             {!utenteLoggato.is_admin && carrello.length > 0 && (
               <div className="mt-16 bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-8 shadow-2xl">
                 <h2 className="text-2xl font-bold text-white mb-6">Il tuo ordine attuale</h2>
@@ -341,7 +364,6 @@ export default function App() {
               </div>
             )}
 
-            {/* LO STORICO ORDINI PERSONALE NON VIENE MOSTRATO AGLI ADMIN */}
             {!utenteLoggato.is_admin && (
               <div className="mt-20 border-t border-white/10 pt-10">
                 <h2 className="text-3xl font-bold text-white/90 tracking-wide mb-8">I Miei Ordini Inviati</h2>
@@ -374,7 +396,18 @@ export default function App() {
         ) : (
           /* --- VISTA ADMIN (STAFF) --- */
           <div className="space-y-8 animate-fadeIn">
-            <h2 className="text-3xl font-black text-cyan-400 tracking-wide border-b border-cyan-500/20 pb-4">Pannello Gestione Ordini Globali (Staff)</h2>
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-cyan-500/20 pb-4 gap-4">
+              <h2 className="text-3xl font-black text-cyan-400 tracking-wide">Pannello Gestione Ordini Globali</h2>
+              
+              {/* --- PULSANTE ESPORTAZIONE CSV --- */}
+              <button 
+                onClick={esportaCsvAdmin}
+                className="bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-200 border border-emerald-500/30 px-5 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 shadow-lg"
+              >
+                📥 Scarica Report CSV per Fornitore
+              </button>
+            </div>
+            
             {tuttiGliOrdiniAdmin.length === 0 ? <p className="text-white/50 text-center py-8 bg-white/5 rounded-2xl">Nessun ordine nel sistema.</p> : (
               <div className="space-y-6">
                 {tuttiGliOrdiniAdmin.map((ord) => (

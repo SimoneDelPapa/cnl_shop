@@ -1,6 +1,9 @@
 import os
+import io
+import csv
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
 from dotenv import load_dotenv
@@ -217,7 +220,6 @@ def get_products():
 
 @app.post("/api/orders")
 def crea_ordine(ordine_in: OrdineCreate, db: Session = Depends(get_db), current_user: Utente = Depends(get_current_user)):
-    # --- BLOCCO SICUREZZA ADMIN: Impediamo agli admin di inviare ordini ---
     if current_user.is_admin:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, 
@@ -285,3 +287,36 @@ def admin_aggiorna_stato_ordine(ordine_id: int, payload: UpdateStatoOrdine, db: 
     ordine.stato_pagamento = payload.stato_pagamento
     db.commit()
     return {"messaggio": "Stato aggiornato con successo"}
+
+# --- NUOVA ROTTA: ESPORTAZIONE CSV ---
+@app.get("/api/admin/export-csv")
+def admin_esporta_csv(db: Session = Depends(get_db), admin_user: Utente = Depends(get_current_admin)):
+    articoli = db.query(ArticoloOrdine).join(Ordine).all()
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Intestazione Colonne
+    writer.writerow(["ID Ordine", "Acquirente", "Prodotto", "Taglia", "Nome Atleta", "Testo Personalizzato", "Prezzo", "Stato Pagamento"])
+    
+    for art in articoli:
+        ordine = art.ordine
+        acquirente = ordine.utente.nome if ordine.utente else "Sconosciuto"
+        writer.writerow([
+            ordine.id,
+            acquirente,
+            art.nome_prodotto,
+            art.taglia,
+            art.atleta,
+            art.nome_personalizzato or "",
+            f"{art.prezzo:.2f}",
+            ordine.stato_pagamento
+        ])
+        
+    output.seek(0)
+    
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=ordini_cnl_shop.csv"}
+    )
