@@ -1,11 +1,13 @@
 import os
 import io
 import csv
+import shutil
 from datetime import datetime, timedelta
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, File, UploadFile, Form
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
+from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
 from pydantic import BaseModel, EmailStr
@@ -66,13 +68,13 @@ class Utente(Base):
     is_attivo = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False) 
 
-# NUOVA TABELLA: Prodotti Dinamici
 class Prodotto(Base):
     __tablename__ = "prodotti"
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String, nullable=False)
     prezzo = Column(Float, nullable=False)
     personalizzabile = Column(Boolean, default=False)
+    immagine_url = Column(String, nullable=True) # <-- NUOVA COLONNA PER IL FILE PNG/JPG
 
 class Ordine(Base):
     __tablename__ = "ordini"
@@ -119,17 +121,12 @@ class UtenteResponse(BaseModel):
     class Config:
         from_attributes = True
 
-# Schemi per il Prodotto
-class ProdottoBase(BaseModel):
+class ProdottoResponse(BaseModel):
+    id: int
     nome: str
     prezzo: float
     personalizzabile: bool
-
-class ProdottoCreate(ProdottoBase):
-    pass
-
-class ProdottoResponse(ProdottoBase):
-    id: int
+    immagine_url: Optional[str] = None
     class Config:
         from_attributes = True
 
@@ -158,6 +155,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Creazione sicura della cartella uploads locale all'avvio
+UPLOAD_DIR = "uploads"
+if not os.path.exists(UPLOAD_DIR):
+    os.makedirs(UPLOAD_DIR)
+
+# ESPONIAMO LA CARTELLA STRUTTURATA PER LE IMMAGINI DEL CATALOGO
+app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 def get_db():
     db = SessionLocal()
@@ -191,7 +196,7 @@ def get_current_admin(current_user: Utente = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Accesso negato. Solo Staff.")
     return current_user
 
-# --- ROTTE API: UTENTI E PRODOTTI ---
+# --- ROTTE API UTENTI & ORDINI ---
 
 @app.post("/api/register", response_model=UtenteResponse, status_code=status.HTTP_201_CREATED)
 def registra_utente(utente: UtenteCreate, db: Session = Depends(get_db)):
@@ -224,7 +229,6 @@ def login_utente(credenziali: UtenteLogin, db: Session = Depends(get_db)):
 def ottieni_utente_corrente(current_user: Utente = Depends(get_current_user)):
     return current_user
 
-# ORA LEGGE I PRODOTTI DAL DATABASE!
 @app.get("/api/products", response_model=List[ProdottoResponse])
 def get_products(db: Session = Depends(get_db)):
     return db.query(Prodotto).order_by(Prodotto.id.asc()).all()
@@ -299,7 +303,7 @@ def admin_esporta_csv(db: Session = Depends(get_db), admin_user: Utente = Depend
     writer = csv.writer(output)
     writer.writerow(["ID Ordine", "Acquirente", "Prodotto", "Taglia", "Nome Atleta", "Testo Personalizzato", "Prezzo", "Stato Pagamento"])
     
-    for art in articoli:
+    for art in articles:
         ordine = art.ordine
         acquirente = ordine.utente.nome if ordine.utente else "Sconosciuto"
         writer.writerow([ordine.id, acquirente, art.nome_prodotto, art.taglia, art.atleta, art.nome_personalizzato or "", f"{art.prezzo:.2f}", ordine.stato_pagamento])
@@ -307,10 +311,29 @@ def admin_esporta_csv(db: Session = Depends(get_db), admin_user: Utente = Depend
     output.seek(0)
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=ordini_cnl_shop.csv"})
 
-# ROTTE ADMIN PER GESTIONE INVENTARIO PRODOTTI
+# MODIFICATO: Accetta dati via Form data + File per l'immagine PNG
 @app.post("/api/admin/products", response_model=ProdottoResponse)
-def admin_crea_prodotto(prodotto: ProdottoCreate, db: Session = Depends(get_db), admin_user: Utente = Depends(get_current_admin)):
-    nuovo_prodotto = Prodotto(**prodotto.model_dump())
+def admin_crea_prodotto(
+    nome: str = Form(...),
+    prezzo: float = Form(...),
+    personalizzabile: bool = Form(...),
+    file: Optional[UploadFile] = File(None),
+    db: Session = Depends(get_db),
+    admin_user: Utente = Depends(get_current_admin)
+):
+    saved_file_url = None
+    if file:
+        # Generiamo un nome file pulito basato sul timestamp per evitare duplicati
+        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+        filename = f"{timestamp}_{file.filename.replace(' ', '_')}"
+        file_path = os.path.join(UPLOAD_DIR, filename)
+        
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        
+        saved_file_url = f"https://cnl-shop-backend.onrender.com/uploads/{filename}"
+
+    nuovo_prodotto = Prodotto(nome=nome, prezzo=prezzo, personalizzabile=personalizzabile, immagine_url=saved_file_url)
     db.add(nuovo_prodotto)
     db.commit()
     db.refresh(nuovo_prodotto)
@@ -321,6 +344,14 @@ def admin_elimina_prodotto(prodotto_id: int, db: Session = Depends(get_db), admi
     prodotto = db.query(Prodotto).filter(Prodotto.id == prodotto_id).first()
     if not prodotto:
         raise HTTPException(status_code=404, detail="Prodotto non trovato")
+    
+    # Se presente, rimuove fisicamente anche il file png locale per non intasare l'hard disk
+    if prodotto.immagine_url:
+        filename = prodotto.immagine_url.split("/")[-1]
+        local_path = os.path.join(UPLOAD_DIR, filename)
+        if os.path.exists(local_path):
+            os.remove(local_path)
+
     db.delete(prodotto)
     db.commit()
     return {"messaggio": "Prodotto eliminato con successo"}

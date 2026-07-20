@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./components/ui/Card";
 import { Button } from "./components/ui/Button";
 import { Badge } from "./components/ui/Badge";
@@ -16,7 +16,6 @@ function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
       return;
     }
     
-    // Fallback sicuro per browser senza HTTPS locale
     const safeUUID = typeof crypto.randomUUID === 'function' 
       ? crypto.randomUUID() 
       : Math.random().toString(36).substring(2, 15);
@@ -37,6 +36,20 @@ function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
 
   return (
     <Card className="flex flex-col justify-between overflow-hidden bg-white/5 backdrop-blur-lg border border-white/10 text-white rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] hover:bg-white/10 transition-all duration-300">
+      
+      {/* SE IL PRODOTTO HA UN'IMMAGINE PNG/JPG CARICATA, LA RENDERING IN CIMA */}
+      {prodotto.immagine_url ? (
+        <div className="w-full h-48 overflow-hidden border-b border-white/10 bg-slate-950/40 flex items-center justify-center">
+          <img 
+            src={prodotto.immagine_url} 
+            alt={prodotto.nome} 
+            className="w-full h-full object-contain p-2 hover:scale-105 transition-transform duration-300"
+          />
+        </div>
+      ) : (
+        <div className="w-full h-12 bg-transparent"></div>
+      )}
+
       <CardHeader className="pb-4 text-center">
         <CardTitle className="text-lg font-bold tracking-wide text-white/90">{prodotto.nome}</CardTitle>
       </CardHeader>
@@ -86,7 +99,7 @@ function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
             )}
           </div>
         ) : (
-          <div className="w-full h-[150px] flex items-center justify-center border border-white/5 bg-white/5 rounded-xl text-center p-4">
+          <div className="w-full h-[120px] flex items-center justify-center border border-white/5 bg-white/5 rounded-xl text-center p-4">
             <p className="text-sm text-white/40 italic">Vista catalogo in modalità Sola Lettura Staff</p>
           </div>
         )}
@@ -120,8 +133,8 @@ export default function App() {
   
   const [adminTab, setAdminTab] = useState('ordini');
   const [nuovoProd, setNuovoProd] = useState({ nome: '', prezzo: '', personalizzabile: false });
+  const [selectedFile, setSelectedFile] = useState(null); // <-- NUOVO STATO PER IL FILE IMMAGINE SELEZIONATO
 
-  // 1. CHIAMATE API
   const caricaProdotti = useCallback(async () => {
     try {
       const res = await fetch('https://cnl-shop-backend.onrender.com/api/products');
@@ -139,21 +152,16 @@ export default function App() {
     try {
       const res = await fetch('https://cnl-shop-backend.onrender.com/api/orders/my-orders', { headers: { 'Authorization': `Bearer ${tokenFisico}` } });
       if (res.ok) setOrdiniUtente(await res.json());
-    } catch (err) { 
-      console.error(err); 
-    }
+    } catch (err) { console.error(err); }
   }, []);
 
   const caricaOrdiniGlobaliAdmin = useCallback(async (tokenFisico) => {
     try {
       const res = await fetch('https://cnl-shop-backend.onrender.com/api/admin/orders', { headers: { 'Authorization': `Bearer ${tokenFisico}` } });
       if (res.ok) setTuttiGliOrdiniAdmin(await res.json());
-    } catch (err) { 
-      console.error(err); 
-    }
+    } catch (err) { console.error(err); }
   }, []);
 
-  // 2. INIZIALIZZAZIONE
   useEffect(() => {
     const initApp = async () => {
       const token = localStorage.getItem('token');
@@ -171,37 +179,43 @@ export default function App() {
           } else {
             await caricaOrdiniUtente(token);
           }
-        } catch (error) { 
-          localStorage.removeItem('token'); 
-        }
+        } catch (error) { localStorage.removeItem('token'); }
       }
       await caricaProdotti();
     };
     initApp();
   }, [caricaProdotti, caricaOrdiniUtente, caricaOrdiniGlobaliAdmin]);
 
-  // 3. AZIONI ADMIN
+  // INVIA IL NUOVO CAPO CON FORMATO FORMDATA (BINARIO)
   const creaProdottoAdmin = useCallback(async () => {
     if (!nuovoProd.nome.trim() || !nuovoProd.prezzo) return alert("Inserisci nome e prezzo del prodotto");
     const token = localStorage.getItem('token');
+    
+    // Costruiamo il form multi-part nativo per includere l'immagine
+    const formData = new FormData();
+    formData.append('nome', nuovoProd.nome);
+    formData.append('prezzo', parseFloat(nuovoProd.prezzo) || 0);
+    formData.append('personalizzabile', nuovoProd.personalizzabile);
+    if (selectedFile) {
+      formData.append('file', selectedFile);
+    }
+
     try {
       const res = await fetch('https://cnl-shop-backend.onrender.com/api/admin/products', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ 
-          nome: nuovoProd.nome, 
-          prezzo: parseFloat(nuovoProd.prezzo) || 0, 
-          personalizzabile: nuovoProd.personalizzabile 
-        })
+        headers: { 'Authorization': `Bearer ${token}` }, // NOTA: Niente Content-Type, lo inserisce il browser da solo per FormData!
+        body: formData
       });
       if (res.ok) {
         setNuovoProd({ nome: '', prezzo: '', personalizzabile: false });
+        setSelectedFile(null);
+        // Svuotiamo l'input file HTML a schermo
+        const fileInput = document.getElementById('file-upload-input');
+        if (fileInput) fileInput.value = '';
         await caricaProdotti();
       }
-    } catch (err) { 
-      alert("Errore creazione prodotto"); 
-    }
-  }, [nuovoProd, caricaProdotti]);
+    } catch (err) { alert("Errore creazione prodotto"); }
+  }, [nuovoProd, selectedFile, caricaProdotti]);
 
   const eliminaProdottoAdmin = useCallback(async (id) => {
     if (!window.confirm("Sei sicuro di voler eliminare questo prodotto dal catalogo?")) return;
@@ -212,9 +226,7 @@ export default function App() {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) await caricaProdotti();
-    } catch (err) { 
-      alert("Errore eliminazione prodotto"); 
-    }
+    } catch (err) { alert("Errore eliminazione prodotto"); }
   }, [caricaProdotti]);
 
   const cambiaStatoOrdineAdmin = useCallback(async (ordineId, nuovoStato) => {
@@ -226,18 +238,14 @@ export default function App() {
         body: JSON.stringify({ stato_pagamento: nuovoStato })
       });
       if (response.ok) await caricaOrdiniGlobaliAdmin(token);
-    } catch (err) { 
-      console.error(err); 
-    }
+    } catch (err) { console.error(err); }
   }, [caricaOrdiniGlobaliAdmin]);
 
   const esportaCsvAdmin = useCallback(async () => {
     const token = localStorage.getItem('token');
     try {
-      const response = await fetch('https://cnl-shop-backend.onrender.com/api/admin/export-csv', { 
-        headers: { 'Authorization': `Bearer ${token}` } 
-      });
-      if (!response.ok) throw new Error("Errore network");
+      const response = await fetch('https://cnl-shop-backend.onrender.com/api/admin/export-csv', { headers: { 'Authorization': `Bearer ${token}` } });
+      if (!response.ok) throw new Error();
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -247,12 +255,9 @@ export default function App() {
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
-    } catch (err) { 
-      alert("❌ Impossibile scaricare il file CSV."); 
-    }
+    } catch (err) { alert("❌ Impossibile scaricare il file CSV."); }
   }, []);
 
-  // 4. AZIONI CARRELLO
   const aggiungiAlCarrello = useCallback((item) => setCarrello(prev => [...prev, item]), []);
   const rimuoviDalCarrello = useCallback((idUnivoco) => setCarrello(prev => prev.filter(item => item.idUnivoco !== idUnivoco)), []);
   const totaleCarrello = useMemo(() => carrello.reduce((acc, item) => acc + item.prezzo, 0), [carrello]);
@@ -272,25 +277,16 @@ export default function App() {
       if (!response.ok) throw new Error("Errore salvataggio");
       const data = await response.json();
       alert(`✅ Ordine #${data.ordine_id} salvato correttamente!`);
-      
       setCarrello([]); 
       await caricaOrdiniUtente(token);
-    } catch (error) { 
-      alert("❌ Errore di connessione o sessione scaduta."); 
-    } finally { 
-      setIsCheckout(false); 
-    }
+    } catch (error) { alert("❌ Errore di connessione o sessione scaduta."); } finally { setIsCheckout(false); }
   }, [carrello, totaleCarrello, caricaOrdiniUtente]);
 
   const gestisciLogout = useCallback(() => {
     localStorage.removeItem('token');
-    setUtenteLoggato(null); 
-    setOrdiniUtente([]); 
-    setTuttiGliOrdiniAdmin([]); 
-    setViewAdmin(false);
+    setUtenteLoggato(null); setOrdiniUtente([]); setTuttiGliOrdiniAdmin([]); setViewAdmin(false);
   }, []);
 
-  // --- RENDER ---
   if (loading && !errore) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center">
@@ -413,30 +409,18 @@ export default function App() {
             )}
           </>
         ) : (
+          /* --- VISTA ADMIN (STAFF) --- */
           <div className="space-y-8 animate-fadeIn">
-            
             <div className="flex gap-4 border-b border-white/10 pb-4">
-              <button 
-                onClick={() => setAdminTab('ordini')} 
-                className={`px-5 py-2 rounded-xl font-bold transition-all ${adminTab === 'ordini' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-lg' : 'text-white/50 hover:bg-white/5'}`}
-              >
-                📦 Gestione Ordini
-              </button>
-              <button 
-                onClick={() => setAdminTab('catalogo')} 
-                className={`px-5 py-2 rounded-xl font-bold transition-all ${adminTab === 'catalogo' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-lg' : 'text-white/50 hover:bg-white/5'}`}
-              >
-                👕 Gestione Catalogo Prodotti
-              </button>
+              <button onClick={() => setAdminTab('ordini')} className={`px-5 py-2 rounded-xl font-bold transition-all ${adminTab === 'ordini' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-lg' : 'text-white/50 hover:bg-white/5'}`}>📦 Gestione Ordini</button>
+              <button onClick={() => setAdminTab('catalogo')} className={`px-5 py-2 rounded-xl font-bold transition-all ${adminTab === 'catalogo' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-lg' : 'text-white/50 hover:bg-white/5'}`}>👕 Gestione Catalogo Prodotti</button>
             </div>
 
             {adminTab === 'ordini' && (
               <div className="space-y-6">
                 <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-2xl font-black text-white">Ordini Ricevuti</h2>
-                  <button onClick={esportaCsvAdmin} className="bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-200 border border-emerald-500/30 px-5 py-2 rounded-xl text-sm font-bold flex items-center gap-2">
-                    📥 Scarica CSV Fornitore
-                  </button>
+                  <h2 className="text-2xl font-black text-white">Ordini Ricevizi</h2>
+                  <button onClick={esportaCsvAdmin} className="bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-200 border border-emerald-500/30 px-5 py-2 rounded-xl text-sm font-bold flex items-center gap-2">📥 Scarica CSV Fornitore</button>
                 </div>
                 {tuttiGliOrdiniAdmin.length === 0 ? <p className="text-white/50 text-center py-8 bg-white/5 rounded-2xl">Nessun ordine nel sistema.</p> : (
                   tuttiGliOrdiniAdmin.map((ord) => (
@@ -478,12 +462,27 @@ export default function App() {
 
             {adminTab === 'catalogo' && (
               <div className="space-y-8">
+                {/* FORM AGGIUNTA PRODOTTO */}
                 <div className="bg-white/5 p-6 rounded-2xl border border-white/10">
                   <h3 className="text-xl font-bold text-white mb-4">Aggiungi Nuovo Prodotto</h3>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                    <div className="md:col-span-2">
-                      <label className="text-xs text-white/70 mb-1 block">Nome Prodotto</label>
-                      <input type="text" value={nuovoProd.nome} onChange={e => setNuovoProd({...nuovoProd, nome: e.target.value})} className="w-full bg-slate-800 border border-white/20 rounded-xl p-2.5 text-white" placeholder="Es. T-Shirt Rappresentanza"/>
+                    <div className="md:col-span-2 space-y-4">
+                      <div>
+                        <label className="text-xs text-white/70 mb-1 block">Nome Prodotto</label>
+                        <input type="text" value={nuovoProd.nome} onChange={e => setNuovoProd({...nuovoProd, nome: e.target.value})} className="w-full bg-slate-800 border border-white/20 rounded-xl p-2.5 text-white" placeholder="Es. T-Shirt Rappresentanza"/>
+                      </div>
+                      
+                      {/* --- NUOVO INPUT PER FILE PNG/JPG --- */}
+                      <div>
+                        <label className="text-xs text-cyan-400 font-bold mb-1 block">Immagine Prodotto (PNG / JPG)</label>
+                        <input 
+                          id="file-upload-input"
+                          type="file" 
+                          accept="image/*"
+                          onChange={e => setSelectedFile(e.target.files[0])}
+                          className="w-full bg-slate-800 border border-white/20 rounded-xl p-1.5 text-xs text-white/70 file:mr-4 file:py-1 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-cyan-500/20 file:text-cyan-300 file:cursor-pointer hover:file:bg-cyan-500/30"
+                        />
+                      </div>
                     </div>
                     <div>
                       <label className="text-xs text-white/70 mb-1 block">Prezzo (€)</label>
@@ -494,20 +493,29 @@ export default function App() {
                       <label htmlFor="pers" className="text-sm font-semibold text-white/90 cursor-pointer">Stampa retro</label>
                     </div>
                   </div>
-                  <Button onClick={creaProdottoAdmin} className="mt-5 w-full md:w-auto bg-amber-500 hover:bg-amber-600 text-slate-900 font-black rounded-xl px-8 py-2.5 shadow-lg shadow-amber-500/20">
+                  <Button onClick={creaProdottoAdmin} className="mt-5 w-full md:w-auto bg-amber-500 hover:bg-amber-600 text-slate-900 font-black rounded-xl px-8 py-2.5 shadow-lg">
                     + Salva Prodotto nel Catalogo
                   </Button>
                 </div>
 
+                {/* LISTA PRODOTTI ESISTENTI */}
                 <div>
                   <h3 className="text-xl font-bold text-white mb-4">Prodotti nel Database ({prodotti.length})</h3>
                   {prodotti.length === 0 ? <p className="text-white/50 text-sm">Nessun prodotto trovato. Inizia ad aggiungerli!</p> : (
                     <div className="space-y-3">
                       {prodotti.map(p => (
                         <div key={`cat-prod-${p.id}`} className="flex justify-between items-center bg-slate-900/50 p-4 rounded-xl border border-white/5 hover:border-white/10 transition-colors">
-                          <div>
-                            <p className="font-bold text-white text-lg">{p.nome} <span className="text-cyan-300 ml-2">€{p.prezzo.toFixed(2)}</span></p>
-                            {p.personalizzabile && <span className="text-xs text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full mt-1 inline-block border border-amber-500/20">Personalizzabile</span>}
+                          <div className="flex items-center gap-4">
+                            {/* Anteprima miniatura per l'admin */}
+                            {p.immagine_url && (
+                              <div className="w-12 h-12 rounded-lg bg-slate-950/40 border border-white/10 overflow-hidden flex items-center justify-center">
+                                <img src={p.immagine_url} alt="" className="w-full h-full object-contain" />
+                              </div>
+                            )}
+                            <div>
+                              <p className="font-bold text-white text-lg">{p.nome} <span className="text-cyan-300 ml-2">€{p.prezzo.toFixed(2)}</span></p>
+                              {p.personalizzabile && <span className="text-xs text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full mt-1 inline-block border border-amber-500/20">Personalizzabile</span>}
+                            </div>
                           </div>
                           <button onClick={() => eliminaProdottoAdmin(p.id)} className="bg-red-500/20 text-red-300 border border-red-500/30 hover:bg-red-500/40 px-4 py-2 rounded-lg text-sm font-bold transition-colors">
                             Elimina
