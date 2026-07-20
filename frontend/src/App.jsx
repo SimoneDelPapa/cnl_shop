@@ -1,18 +1,19 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./components/ui/Card"
-import { Button } from "./components/ui/Button"
-import { Badge } from "./components/ui/Badge"
-import Auth from './Auth'
+import React, { useState, useEffect, useCallback } from 'react';
+import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./components/ui/Card";
+import { Button } from "./components/ui/Button";
+import { Badge } from "./components/ui/Badge";
+import Auth from './Auth';
 
-function ProdottoCard({ prodotto, onAggiungi }) {
-  const [atleta, setAtleta] = useState('')
-  const [taglia, setTaglia] = useState('M')
-  const [nomePers, setNomePers] = useState('')
+// --- COMPONENTE PRODOTTO ---
+function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
+  const [atleta, setAtleta] = useState('');
+  const [taglia, setTaglia] = useState('M');
+  const [nomePers, setNomePers] = useState('');
 
   const handleAdd = () => {
     if (!atleta.trim()) {
-      alert("Attenzione: Inserisci il nome dell'atleta a cui è destinato il capo.")
-      return
+      alert("Attenzione: Inserisci il nome dell'atleta a cui è destinato il capo.");
+      return;
     }
     
     onAggiungi({
@@ -23,11 +24,11 @@ function ProdottoCard({ prodotto, onAggiungi }) {
       atleta: atleta.trim(),
       taglia: taglia,
       nomePersonalizzato: prodotto.personalizzabile ? nomePers.trim() : null
-    })
+    });
     
-    setAtleta('')
-    setNomePers('')
-  }
+    setAtleta('');
+    setNomePers('');
+  };
 
   return (
     <Card className="flex flex-col justify-between overflow-hidden bg-white/5 backdrop-blur-lg border border-white/10 text-white rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] hover:bg-white/10 transition-all duration-300">
@@ -48,55 +49,72 @@ function ProdottoCard({ prodotto, onAggiungi }) {
           <div className="h-[34px] mb-4"></div>
         )}
 
-        <div className="w-full space-y-3 text-left">
-          <div>
-            <label className="text-xs text-white/70 font-semibold mb-1 block">Nome Atleta (chi lo indossa)</label>
-            <input 
-              type="text" value={atleta} onChange={e => setAtleta(e.target.value)} placeholder="Es. Giulia"
-              className="w-full bg-white/5 border border-white/20 rounded-lg p-2 text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-400"
-            />
-          </div>
-          <div>
-            <label className="text-xs text-white/70 font-semibold mb-1 block">Taglia</label>
-            <select 
-              value={taglia} onChange={e => setTaglia(e.target.value)}
-              className="w-full bg-white/5 border border-white/20 rounded-lg p-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-400 [&>option]:text-slate-900 appearance-none"
-            >
-              <option value="S">S</option><option value="M">M</option><option value="L">L</option><option value="XL">XL</option>
-            </select>
-          </div>
-          {prodotto.personalizzabile && (
+        {/* NASCONDI I CAMPI DI INSERIMENTO SE E' ADMIN */}
+        {!isUserAdmin ? (
+          <div className="w-full space-y-3 text-left">
             <div>
-              <label className="text-xs text-white/70 font-semibold mb-1 block">Testo Personalizzato</label>
+              <label className="text-xs text-white/70 font-semibold mb-1 block">Nome Atleta (chi lo indossa)</label>
               <input 
-                type="text" value={nomePers} onChange={e => setNomePers(e.target.value.toUpperCase())} placeholder="Es. GIULIA 10"
-                className="w-full bg-white/5 border border-white/20 rounded-lg p-2 text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-400 font-bold"
+                type="text" value={atleta} onChange={e => setAtleta(e.target.value)} placeholder="Es. Giulia"
+                className="w-full bg-white/5 border border-white/20 rounded-lg p-2 text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-400"
               />
             </div>
-          )}
-        </div>
+            <div>
+              <label className="text-xs text-white/70 font-semibold mb-1 block">Taglia</label>
+              <select 
+                value={taglia} onChange={e => setTaglia(e.target.value)}
+                className="w-full bg-white/5 border border-white/20 rounded-lg p-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-400 [&>option]:text-slate-900 appearance-none"
+              >
+                <option value="S">S</option>
+                <option value="M">M</option>
+                <option value="L">L</option>
+                <option value="XL">XL</option>
+              </select>
+            </div>
+            {prodotto.personalizzabile && (
+              <div>
+                <label className="text-xs text-white/70 font-semibold mb-1 block">Testo Personalizzato</label>
+                <input 
+                  type="text" value={nomePers} onChange={e => setNomePers(e.target.value.toUpperCase())} placeholder="Es. GIULIA 10"
+                  className="w-full bg-white/5 border border-white/20 rounded-lg p-2 text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-400 font-bold"
+                />
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="w-full h-[150px] flex items-center justify-center border border-white/5 bg-white/5 rounded-xl text-center p-4">
+            <p className="text-sm text-white/40 italic">Vista catalogo in modalità Sola Lettura Staff</p>
+          </div>
+        )}
       </CardContent>
       <CardFooter className="pt-4">
-        <Button onClick={handleAdd} className="w-full font-bold bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white border border-white/10 shadow-[0_4px_12px_rgba(59,130,246,0.3)] transition-all rounded-xl py-5">
-          Aggiungi al carrello
-        </Button>
+        {/* NASCONDI IL PULSANTE DI ACQUISTO SE E' ADMIN */}
+        {!isUserAdmin ? (
+          <Button onClick={handleAdd} className="w-full font-bold bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white border border-white/10 shadow-[0_4px_12px_rgba(59,130,246,0.3)] transition-all rounded-xl py-5">
+            Aggiungi al carrello
+          </Button>
+        ) : (
+          <div className="w-full text-center py-2 bg-amber-500/10 border border-amber-500/20 rounded-xl text-xs text-amber-300 font-semibold uppercase tracking-wider">
+            Account Amministratore
+          </div>
+        )}
       </CardFooter>
     </Card>
-  )
+  );
 }
 
+// --- APPLICAZIONE PRINCIPALE ---
 export default function App() {
-  const [utenteLoggato, setUtenteLoggato] = useState(null)
-  const [prodotti, setProdotti] = useState([])
-  const [carrello, setCarrello] = useState([])
-  const [ordiniUtente, setOrdiniUtente] = useState([])
-  const [tuttiGliOrdiniAdmin, setTuttiGliOrdiniAdmin] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [errore, setErrore] = useState(null)
-  const [isCheckout, setIsCheckout] = useState(false) 
-  const [viewAdmin, setViewAdmin] = useState(false)
+  const [utenteLoggato, setUtenteLoggato] = useState(null);
+  const [prodotti, setProdotti] = useState([]);
+  const [carrello, setCarrello] = useState([]);
+  const [ordiniUtente, setOrdiniUtente] = useState([]);
+  const [tuttiGliOrdiniAdmin, setTuttiGliOrdiniAdmin] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errore, setErrore] = useState(null);
+  const [isCheckout, setIsCheckout] = useState(false);
+  const [viewAdmin, setViewAdmin] = useState(false);
 
-  // 1. Funzioni globali di caricamento definite con useCallback
   const caricaProdotti = useCallback(async () => {
     try {
       const res = await fetch('https://cnl-shop-backend.onrender.com/api/products');
@@ -138,7 +156,6 @@ export default function App() {
     }
   }, []);
 
-  // 2. Controllo Sessione Iniziale
   useEffect(() => {
     const initApp = async () => {
       const token = localStorage.getItem('token');
@@ -152,9 +169,11 @@ export default function App() {
           const datiUtente = await res.json();
           setUtenteLoggato(datiUtente);
           
-          await caricaOrdiniUtente(token);
           if (datiUtente.is_admin) {
+            setViewAdmin(true); // Reindirizza l'admin al pannello staff all'avvio
             await caricaOrdiniGlobaliAdmin(token);
+          } else {
+            await caricaOrdiniUtente(token);
           }
         } catch (error) {
           console.warn("Sessione scaduta:", error.message);
@@ -167,7 +186,6 @@ export default function App() {
     initApp();
   }, [caricaProdotti, caricaOrdiniUtente, caricaOrdiniGlobaliAdmin]);
 
-  // 3. Funzioni operative
   const cambiaStatoOrdineAdmin = useCallback(async (ordineId, nuovoStato) => {
     const token = localStorage.getItem('token');
     try {
@@ -177,20 +195,19 @@ export default function App() {
         body: JSON.stringify({ stato_pagamento: nuovoStato })
       });
       if (response.ok) {
-        caricaOrdiniGlobaliAdmin(token);
+        await caricaOrdiniGlobaliAdmin(token);
       }
     } catch (err) { 
       console.error(err); 
     }
   }, [caricaOrdiniGlobaliAdmin]);
 
-  // Usiamo il setter funzionale per il carrello così non dobbiamo inserirlo nelle dipendenze
-  const aggiungiAlCarrello = (item) => setCarrello(prev => [...prev, item])
-  const rimuoviDalCarrello = (idUnivoco) => setCarrello(prev => prev.filter(item => item.idUnivoco !== idUnivoco))
-  const totaleCarrello = carrello.reduce((acc, item) => acc + item.prezzo, 0)
+  const aggiungiAlCarrello = (item) => setCarrello(prev => [...prev, item]);
+  const rimuoviDalCarrello = (idUnivoco) => setCarrello(prev => prev.filter(item => item.idUnivoco !== idUnivoco));
+  const totaleCarrello = carrello.reduce((acc, item) => acc + item.prezzo, 0);
 
   const gestisciCheckout = useCallback(async () => {
-    setIsCheckout(true)
+    setIsCheckout(true);
     try {
       const token = localStorage.getItem('token'); 
       if (!token) throw new Error("Token mancante");
@@ -207,49 +224,48 @@ export default function App() {
       
       setCarrello([]); 
       await caricaOrdiniUtente(token);
-
-      if (utenteLoggato?.is_admin) {
-        await caricaOrdiniGlobaliAdmin(token);
-      }
     } catch (error) {
       console.error("Errore durante il checkout:", error);
       alert("❌ Errore di connessione o sessione scaduta.");
     } finally {
-      setIsCheckout(false)
+      setIsCheckout(false);
     }
-  }, [carrello, totaleCarrello, utenteLoggato, caricaOrdiniUtente, caricaOrdiniGlobaliAdmin]);
+  }, [carrello, totaleCarrello, caricaOrdiniUtente]);
 
   const gestisciLogout = () => {
-    localStorage.removeItem('token')
-    setUtenteLoggato(null)
-    setOrdiniUtente([])
-    setTuttiGliOrdiniAdmin([])
-    setViewAdmin(false)
-  }
+    localStorage.removeItem('token');
+    setUtenteLoggato(null);
+    setOrdiniUtente([]);
+    setTuttiGliOrdiniAdmin([]);
+    setViewAdmin(false);
+  };
 
-  // --- RENDERING ---
   if (loading && !errore) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center">
         <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-white mb-4"></div>
         <p className="text-white/70 font-semibold tracking-wide animate-pulse">Caricamento in corso...</p>
       </div>
-    )
+    );
   }
 
   if (!utenteLoggato) {
     return (
       <div className="font-sans text-white antialiased">
         <Auth onLoginSuccess={(datiUtente) => {
-          setUtenteLoggato(datiUtente)
-          const t = localStorage.getItem('token')
+          setUtenteLoggato(datiUtente);
+          const t = localStorage.getItem('token');
           if(t) {
-            caricaOrdiniUtente(t)
-            if (datiUtente.is_admin) caricaOrdiniGlobaliAdmin(t)
+            if (datiUtente.is_admin) {
+              setViewAdmin(true);
+              caricaOrdiniGlobaliAdmin(t);
+            } else {
+              caricaOrdiniUtente(t);
+            }
           }
         }} />
       </div>
-    )
+    );
   }
 
   return (
@@ -263,11 +279,12 @@ export default function App() {
         <div className="mt-6 pt-4 border-t border-white/10 flex flex-col md:flex-row justify-between items-center gap-4">
           <p className="text-sm text-white/70">
             Accesso come <strong className="text-white">{utenteLoggato.nome}</strong>
+            {utenteLoggato.is_admin && <span className="text-xs ml-2 bg-amber-500/20 border border-amber-400/30 text-amber-300 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Staff</span>}
           </p>
           <div className="flex gap-3">
             {utenteLoggato?.is_admin && (
               <button onClick={() => setViewAdmin(!viewAdmin)} className="text-xs bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-200 border border-cyan-500/30 px-4 py-1.5 rounded-full transition-colors font-bold uppercase tracking-wider">
-                {viewAdmin ? "Torna al Negozio" : "Pannello Staff"}
+                {viewAdmin ? "Vedi Catalogo Prodotti" : "Torna a Gestione Ordini"}
               </button>
             )}
             <button onClick={gestisciLogout} className="text-xs bg-red-500/20 hover:bg-red-500/40 text-red-200 border border-red-500/30 px-4 py-1.5 rounded-full transition-colors font-bold uppercase tracking-wider">Esci</button>
@@ -279,14 +296,22 @@ export default function App() {
         {!viewAdmin ? (
           /* --- VISTA NORMALE (NEGOZIO) --- */
           <>
-            <h2 className="text-3xl font-bold text-white/90 tracking-wide mb-8 border-b border-white/10 pb-4">Catalogo</h2>
+            <h2 className="text-3xl font-bold text-white/90 tracking-wide mb-8 border-b border-white/10 pb-4">Catalogo Abbigliamento</h2>
             {errore ? <div className="bg-red-500/20 p-4 rounded-xl text-red-200">{errore}</div> : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                {prodotti.map(prodotto => <ProdottoCard key={prodotto.id} prodotto={prodotto} onAggiungi={aggiungiAlCarrello} />)}
+                {prodotti.map(prodotto => (
+                  <ProdottoCard 
+                    key={prodotto.id} 
+                    prodotto={prodotto} 
+                    onAggiungi={aggiungiAlCarrello} 
+                    isUserAdmin={utenteLoggato.is_admin} /* Passiamo l'informazione alla tessera! */
+                  />
+                ))}
               </div>
             )}
 
-            {carrello.length > 0 && (
+            {/* IL CARRELLO NON VIENE MOSTRATO AGLI ADMIN */}
+            {!utenteLoggato.is_admin && carrello.length > 0 && (
               <div className="mt-16 bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-8 shadow-2xl">
                 <h2 className="text-2xl font-bold text-white mb-6">Il tuo ordine attuale</h2>
                 <div className="space-y-4 mb-8">
@@ -316,37 +341,40 @@ export default function App() {
               </div>
             )}
 
-            <div className="mt-20 border-t border-white/10 pt-10">
-              <h2 className="text-3xl font-bold text-white/90 tracking-wide mb-8">I Miei Ordini Inviati</h2>
-              {ordiniUtente.length === 0 ? <p className="text-white/50 text-center py-8 italic bg-white/5 rounded-2xl">Non hai ancora inviato nessun ordine.</p> : (
-                <div className="space-y-6">
-                  {ordiniUtente.map((ord) => (
-                    <div key={ord.id} className="bg-white/5 border border-white/10 rounded-2xl p-6 shadow-md">
-                      <div className="flex justify-between items-center border-b border-white/10 pb-4 mb-4">
-                        <h3 className="text-xl font-bold text-blue-200">Ordine #{ord.id}</h3>
-                        <Badge className={`px-3 py-1 text-xs rounded-full border ${ord.stato_pagamento === 'In attesa' ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' : 'bg-green-500/20 text-green-300 border-green-500/30'}`}>{ord.stato_pagamento}</Badge>
-                      </div>
-                      <div className="divide-y divide-white/5 space-y-3">
-                        {ord.articoli.map((art, idx) => (
-                          <div key={idx} className="pt-3 first:pt-0 flex justify-between items-center text-sm">
-                            <div>
-                              <p className="font-bold text-white/90">{art.nome_prodotto} <span className="text-xs text-white/40">({art.taglia})</span></p>
-                              <p className="text-xs text-white/60">Destinatario: <span className="text-white">{art.atleta}</span> {art.nome_personalizzato && <span> | Stampa: <span className="text-cyan-400">"{art.nome_personalizzato}"</span></span>}</p>
+            {/* LO STORICO ORDINI PERSONALE NON VIENE MOSTRATO AGLI ADMIN */}
+            {!utenteLoggato.is_admin && (
+              <div className="mt-20 border-t border-white/10 pt-10">
+                <h2 className="text-3xl font-bold text-white/90 tracking-wide mb-8">I Miei Ordini Inviati</h2>
+                {ordiniUtente.length === 0 ? <p className="text-white/50 text-center py-8 italic bg-white/5 rounded-2xl">Non hai ancora inviato nessun ordine.</p> : (
+                  <div className="space-y-6">
+                    {ordiniUtente.map((ord) => (
+                      <div key={ord.id} className="bg-white/5 border border-white/10 rounded-2xl p-6 shadow-md">
+                        <div className="flex justify-between items-center border-b border-white/10 pb-4 mb-4">
+                          <h3 className="text-xl font-bold text-blue-200">Ordine #{ord.id}</h3>
+                          <Badge className={`px-3 py-1 text-xs rounded-full border ${ord.stato_pagamento === 'In attesa' ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' : 'bg-green-500/20 text-green-300 border-green-500/30'}`}>{ord.stato_pagamento}</Badge>
+                        </div>
+                        <div className="divide-y divide-white/5 space-y-3">
+                          {ord.articoli.map((art, idx) => (
+                            <div key={idx} className="pt-3 first:pt-0 flex justify-between items-center text-sm">
+                              <div>
+                                <p className="font-bold text-white/90">{art.nome_prodotto} <span className="text-xs text-white/40">({art.taglia})</span></p>
+                                <p className="text-xs text-white/60">Destinatario: <span className="text-white">{art.atleta}</span> {art.nome_personalizzato && <span> | Stampa: <span className="text-cyan-400">"{art.nome_personalizzato}"</span></span>}</p>
+                              </div>
+                              <span className="font-semibold text-white/80">€{art.prezzo.toFixed(2)}</span>
                             </div>
-                            <span className="font-semibold text-white/80">€{art.prezzo.toFixed(2)}</span>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </>
         ) : (
           /* --- VISTA ADMIN (STAFF) --- */
           <div className="space-y-8 animate-fadeIn">
-            <h2 className="text-3xl font-black text-cyan-400 tracking-wide border-b border-cyan-500/20 pb-4">Pannello Gestione Ordini (Staff)</h2>
+            <h2 className="text-3xl font-black text-cyan-400 tracking-wide border-b border-cyan-500/20 pb-4">Pannello Gestione Ordini Globali (Staff)</h2>
             {tuttiGliOrdiniAdmin.length === 0 ? <p className="text-white/50 text-center py-8 bg-white/5 rounded-2xl">Nessun ordine nel sistema.</p> : (
               <div className="space-y-6">
                 {tuttiGliOrdiniAdmin.map((ord) => (
@@ -362,7 +390,6 @@ export default function App() {
                           <span className="text-xs text-white/40 block">Totale</span>
                           <span className="font-black text-xl text-cyan-300">€{ord.totale.toFixed(2)}</span>
                         </div>
-                        {/* SELECT PER CAMBIARE LO STATO IN TEMPO REALE */}
                         <select 
                           value={ord.stato_pagamento} 
                           onChange={(e) => cambiaStatoOrdineAdmin(ord.id, e.target.value)}
@@ -393,5 +420,5 @@ export default function App() {
         )}
       </main>
     </div>
-  )
+  );
 }

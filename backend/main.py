@@ -61,7 +61,7 @@ class Utente(Base):
     nome = Column(String, nullable=False)
     hashed_password = Column(String, nullable=False)
     is_attivo = Column(Boolean, default=True)
-    is_admin = Column(Boolean, default=False) # <-- NUOVO CAMPO: Ruolo Amministratore
+    is_admin = Column(Boolean, default=False) 
 
 class Ordine(Base):
     __tablename__ = "ordini"
@@ -71,7 +71,7 @@ class Ordine(Base):
     utente_id = Column(Integer, ForeignKey("utenti.id"), nullable=True) 
     
     articoli = relationship("ArticoloOrdine", back_populates="ordine")
-    utente = relationship("Utente") # <-- NUOVA RELAZIONE per vedere chi ha fatto l'ordine
+    utente = relationship("Utente") 
 
 class ArticoloOrdine(Base):
     __tablename__ = "articoli_ordine"
@@ -103,7 +103,7 @@ class UtenteResponse(BaseModel):
     email: EmailStr
     nome: str
     is_attivo: bool
-    is_admin: bool # <-- ESPONIAMO IL RUOLO AL FRONTEND
+    is_admin: bool 
 
     class Config:
         from_attributes = True
@@ -217,6 +217,13 @@ def get_products():
 
 @app.post("/api/orders")
 def crea_ordine(ordine_in: OrdineCreate, db: Session = Depends(get_db), current_user: Utente = Depends(get_current_user)):
+    # --- BLOCCO SICUREZZA ADMIN: Impediamo agli admin di inviare ordini ---
+    if current_user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="Operazione negata. Gli amministratori non possono effettuare ordini."
+        )
+    
     try:
         nuovo_ordine = Ordine(totale=ordine_in.totale, utente_id=current_user.id)
         db.add(nuovo_ordine)
@@ -252,7 +259,7 @@ def ottieni_ordini_utente(db: Session = Depends(get_db), current_user: Utente = 
         })
     return risposta
 
-# --- NUOVE ROTTE ESCLUSIVE ADMIN ---
+# --- ROTTE ESCLUSIVE ADMIN ---
 
 @app.get("/api/admin/orders")
 def admin_ottieni_tutti_gli_ordini(db: Session = Depends(get_db), admin_user: Utente = Depends(get_current_admin)):
