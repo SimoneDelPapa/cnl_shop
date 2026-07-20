@@ -66,6 +66,14 @@ class Utente(Base):
     is_attivo = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False) 
 
+# NUOVA TABELLA: Prodotti Dinamici
+class Prodotto(Base):
+    __tablename__ = "prodotti"
+    id = Column(Integer, primary_key=True, index=True)
+    nome = Column(String, nullable=False)
+    prezzo = Column(Float, nullable=False)
+    personalizzabile = Column(Boolean, default=False)
+
 class Ordine(Base):
     __tablename__ = "ordini"
     id = Column(Integer, primary_key=True, index=True)
@@ -111,9 +119,19 @@ class UtenteResponse(BaseModel):
     class Config:
         from_attributes = True
 
-class Token(BaseModel):
-    access_token: str
-    token_type: str
+# Schemi per il Prodotto
+class ProdottoBase(BaseModel):
+    nome: str
+    prezzo: float
+    personalizzabile: bool
+
+class ProdottoCreate(ProdottoBase):
+    pass
+
+class ProdottoResponse(ProdottoBase):
+    id: int
+    class Config:
+        from_attributes = True
 
 class ArticoloCarrello(BaseModel):
     prodottoId: int
@@ -135,10 +153,7 @@ app = FastAPI(title="CNL Shop API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "https://simonedelpapa.github.io"
-    ],
+    allow_origins=["http://localhost:5173", "https://simonedelpapa.github.io"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -176,7 +191,7 @@ def get_current_admin(current_user: Utente = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Accesso negato. Solo Staff.")
     return current_user
 
-# --- ROTTE API UTENTI & ORDINI ---
+# --- ROTTE API: UTENTI E PRODOTTI ---
 
 @app.post("/api/register", response_model=UtenteResponse, status_code=status.HTTP_201_CREATED)
 def registra_utente(utente: UtenteCreate, db: Session = Depends(get_db)):
@@ -209,22 +224,15 @@ def login_utente(credenziali: UtenteLogin, db: Session = Depends(get_db)):
 def ottieni_utente_corrente(current_user: Utente = Depends(get_current_user)):
     return current_user
 
-@app.get("/api/products")
-def get_products():
-    return [
-        {"id": 1, "nome": "Accappatoio Pallanuoto", "prezzo": 45.00, "personalizzabile": True},
-        {"id": 2, "nome": "Costume Gara Pallanuoto", "prezzo": 35.00, "personalizzabile": False},
-        {"id": 3, "nome": "T-Shirt Rappresentanza", "prezzo": 15.00, "personalizzabile": True},
-        {"id": 4, "nome": "Cuffia in silicone", "prezzo": 8.00, "personalizzabile": False}
-    ]
+# ORA LEGGE I PRODOTTI DAL DATABASE!
+@app.get("/api/products", response_model=List[ProdottoResponse])
+def get_products(db: Session = Depends(get_db)):
+    return db.query(Prodotto).order_by(Prodotto.id.asc()).all()
 
 @app.post("/api/orders")
 def crea_ordine(ordine_in: OrdineCreate, db: Session = Depends(get_db), current_user: Utente = Depends(get_current_user)):
     if current_user.is_admin:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, 
-            detail="Operazione negata. Gli amministratori non possono effettuare ordini."
-        )
+        raise HTTPException(status_code=403, detail="Gli amministratori non possono effettuare ordini.")
     
     try:
         nuovo_ordine = Ordine(totale=ordine_in.totale, utente_id=current_user.id)
@@ -269,11 +277,8 @@ def admin_ottieni_tutti_gli_ordini(db: Session = Depends(get_db), admin_user: Ut
     risposta = []
     for o in ordini:
         risposta.append({
-            "id": o.id,
-            "totale": o.totale,
-            "stato_pagamento": o.stato_pagamento,
-            "acquirente": o.utente.nome if o.utente else "Sconosciuto",
-            "email_acquirente": o.utente.email if o.utente else "Sconosciuta",
+            "id": o.id, "totale": o.totale, "stato_pagamento": o.stato_pagamento,
+            "acquirente": o.utente.nome if o.utente else "Sconosciuto", "email_acquirente": o.utente.email if o.utente else "Sconosciuta",
             "articoli": [{"nome_prodotto": art.nome_prodotto, "prezzo": art.prezzo, "atleta": art.atleta, "taglia": art.taglia, "nome_personalizzato": art.nome_personalizzato} for art in o.articoli]
         })
     return risposta
@@ -283,40 +288,39 @@ def admin_aggiorna_stato_ordine(ordine_id: int, payload: UpdateStatoOrdine, db: 
     ordine = db.query(Ordine).filter(Ordine.id == ordine_id).first()
     if not ordine:
         raise HTTPException(status_code=404, detail="Ordine non trovato")
-    
     ordine.stato_pagamento = payload.stato_pagamento
     db.commit()
     return {"messaggio": "Stato aggiornato con successo"}
 
-# --- NUOVA ROTTA: ESPORTAZIONE CSV ---
 @app.get("/api/admin/export-csv")
 def admin_esporta_csv(db: Session = Depends(get_db), admin_user: Utente = Depends(get_current_admin)):
     articoli = db.query(ArticoloOrdine).join(Ordine).all()
-    
     output = io.StringIO()
     writer = csv.writer(output)
-    
-    # Intestazione Colonne
     writer.writerow(["ID Ordine", "Acquirente", "Prodotto", "Taglia", "Nome Atleta", "Testo Personalizzato", "Prezzo", "Stato Pagamento"])
     
     for art in articoli:
         ordine = art.ordine
         acquirente = ordine.utente.nome if ordine.utente else "Sconosciuto"
-        writer.writerow([
-            ordine.id,
-            acquirente,
-            art.nome_prodotto,
-            art.taglia,
-            art.atleta,
-            art.nome_personalizzato or "",
-            f"{art.prezzo:.2f}",
-            ordine.stato_pagamento
-        ])
+        writer.writerow([ordine.id, acquirente, art.nome_prodotto, art.taglia, art.atleta, art.nome_personalizzato or "", f"{art.prezzo:.2f}", ordine.stato_pagamento])
         
     output.seek(0)
-    
-    return StreamingResponse(
-        iter([output.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=ordini_cnl_shop.csv"}
-    )
+    return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=ordini_cnl_shop.csv"})
+
+# ROTTE ADMIN PER GESTIONE INVENTARIO PRODOTTI
+@app.post("/api/admin/products", response_model=ProdottoResponse)
+def admin_crea_prodotto(prodotto: ProdottoCreate, db: Session = Depends(get_db), admin_user: Utente = Depends(get_current_admin)):
+    nuovo_prodotto = Prodotto(**prodotto.model_dump())
+    db.add(nuovo_prodotto)
+    db.commit()
+    db.refresh(nuovo_prodotto)
+    return nuovo_prodotto
+
+@app.delete("/api/admin/products/{prodotto_id}")
+def admin_elimina_prodotto(prodotto_id: int, db: Session = Depends(get_db), admin_user: Utente = Depends(get_current_admin)):
+    prodotto = db.query(Prodotto).filter(Prodotto.id == prodotto_id).first()
+    if not prodotto:
+        raise HTTPException(status_code=404, detail="Prodotto non trovato")
+    db.delete(prodotto)
+    db.commit()
+    return {"messaggio": "Prodotto eliminato con successo"}

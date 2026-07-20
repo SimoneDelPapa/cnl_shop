@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./components/ui/Card";
 import { Button } from "./components/ui/Button";
 import { Badge } from "./components/ui/Badge";
@@ -16,8 +16,13 @@ function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
       return;
     }
     
+    // Fallback sicuro per browser senza HTTPS locale
+    const safeUUID = typeof crypto.randomUUID === 'function' 
+      ? crypto.randomUUID() 
+      : Math.random().toString(36).substring(2, 15);
+    
     onAggiungi({
-      idUnivoco: crypto.randomUUID(), 
+      idUnivoco: safeUUID, 
       prodottoId: prodotto.id,
       nomeProdotto: prodotto.nome,
       prezzo: prodotto.prezzo,
@@ -49,7 +54,6 @@ function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
           <div className="h-[34px] mb-4"></div>
         )}
 
-        {/* NASCONDI I CAMPI DI INSERIMENTO SE E' ADMIN */}
         {!isUserAdmin ? (
           <div className="w-full space-y-3 text-left">
             <div>
@@ -88,7 +92,6 @@ function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
         )}
       </CardContent>
       <CardFooter className="pt-4">
-        {/* NASCONDI IL PULSANTE DI ACQUISTO SE E' ADMIN */}
         {!isUserAdmin ? (
           <Button onClick={handleAdd} className="w-full font-bold bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white border border-white/10 shadow-[0_4px_12px_rgba(59,130,246,0.3)] transition-all rounded-xl py-5">
             Aggiungi al carrello
@@ -114,7 +117,11 @@ export default function App() {
   const [errore, setErrore] = useState(null);
   const [isCheckout, setIsCheckout] = useState(false);
   const [viewAdmin, setViewAdmin] = useState(false);
+  
+  const [adminTab, setAdminTab] = useState('ordini');
+  const [nuovoProd, setNuovoProd] = useState({ nome: '', prezzo: '', personalizzabile: false });
 
+  // 1. CHIAMATE API
   const caricaProdotti = useCallback(async () => {
     try {
       const res = await fetch('https://cnl-shop-backend.onrender.com/api/products');
@@ -130,40 +137,29 @@ export default function App() {
 
   const caricaOrdiniUtente = useCallback(async (tokenFisico) => {
     try {
-      const res = await fetch('https://cnl-shop-backend.onrender.com/api/orders/my-orders', {
-        headers: { 'Authorization': `Bearer ${tokenFisico}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setOrdiniUtente(data);
-      }
-    } catch (err) {
-      console.error(err);
+      const res = await fetch('https://cnl-shop-backend.onrender.com/api/orders/my-orders', { headers: { 'Authorization': `Bearer ${tokenFisico}` } });
+      if (res.ok) setOrdiniUtente(await res.json());
+    } catch (err) { 
+      console.error(err); 
     }
   }, []);
 
   const caricaOrdiniGlobaliAdmin = useCallback(async (tokenFisico) => {
     try {
-      const res = await fetch('https://cnl-shop-backend.onrender.com/api/admin/orders', {
-        headers: { 'Authorization': `Bearer ${tokenFisico}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setTuttiGliOrdiniAdmin(data);
-      }
-    } catch (err) {
-      console.error(err);
+      const res = await fetch('https://cnl-shop-backend.onrender.com/api/admin/orders', { headers: { 'Authorization': `Bearer ${tokenFisico}` } });
+      if (res.ok) setTuttiGliOrdiniAdmin(await res.json());
+    } catch (err) { 
+      console.error(err); 
     }
   }, []);
 
+  // 2. INIZIALIZZAZIONE
   useEffect(() => {
     const initApp = async () => {
       const token = localStorage.getItem('token');
       if (token) {
         try {
-          const res = await fetch('https://cnl-shop-backend.onrender.com/api/users/me', {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
+          const res = await fetch('https://cnl-shop-backend.onrender.com/api/users/me', { headers: { 'Authorization': `Bearer ${token}` } });
           if (!res.ok) throw new Error("Token non valido");
           
           const datiUtente = await res.json();
@@ -175,16 +171,51 @@ export default function App() {
           } else {
             await caricaOrdiniUtente(token);
           }
-        } catch (error) {
-          console.warn("Sessione scaduta:", error.message);
-          localStorage.removeItem('token');
+        } catch (error) { 
+          localStorage.removeItem('token'); 
         }
       }
       await caricaProdotti();
     };
-
     initApp();
   }, [caricaProdotti, caricaOrdiniUtente, caricaOrdiniGlobaliAdmin]);
+
+  // 3. AZIONI ADMIN
+  const creaProdottoAdmin = useCallback(async () => {
+    if (!nuovoProd.nome.trim() || !nuovoProd.prezzo) return alert("Inserisci nome e prezzo del prodotto");
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch('https://cnl-shop-backend.onrender.com/api/admin/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ 
+          nome: nuovoProd.nome, 
+          prezzo: parseFloat(nuovoProd.prezzo) || 0, 
+          personalizzabile: nuovoProd.personalizzabile 
+        })
+      });
+      if (res.ok) {
+        setNuovoProd({ nome: '', prezzo: '', personalizzabile: false });
+        await caricaProdotti();
+      }
+    } catch (err) { 
+      alert("Errore creazione prodotto"); 
+    }
+  }, [nuovoProd, caricaProdotti]);
+
+  const eliminaProdottoAdmin = useCallback(async (id) => {
+    if (!window.confirm("Sei sicuro di voler eliminare questo prodotto dal catalogo?")) return;
+    const token = localStorage.getItem('token');
+    try {
+      const res = await fetch(`https://cnl-shop-backend.onrender.com/api/admin/products/${id}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) await caricaProdotti();
+    } catch (err) { 
+      alert("Errore eliminazione prodotto"); 
+    }
+  }, [caricaProdotti]);
 
   const cambiaStatoOrdineAdmin = useCallback(async (ordineId, nuovoStato) => {
     const token = localStorage.getItem('token');
@@ -194,23 +225,19 @@ export default function App() {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ stato_pagamento: nuovoStato })
       });
-      if (response.ok) {
-        await caricaOrdiniGlobaliAdmin(token);
-      }
+      if (response.ok) await caricaOrdiniGlobaliAdmin(token);
     } catch (err) { 
       console.error(err); 
     }
   }, [caricaOrdiniGlobaliAdmin]);
 
-  // --- NUOVA FUNZIONE: ESPORTA CSV ---
-  const esportaCsvAdmin = async () => {
+  const esportaCsvAdmin = useCallback(async () => {
     const token = localStorage.getItem('token');
     try {
-      const response = await fetch('https://cnl-shop-backend.onrender.com/api/admin/export-csv', {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const response = await fetch('https://cnl-shop-backend.onrender.com/api/admin/export-csv', { 
+        headers: { 'Authorization': `Bearer ${token}` } 
       });
-      if (!response.ok) throw new Error("Errore durante l'esportazione");
-      
+      if (!response.ok) throw new Error("Errore network");
       const blob = await response.blob();
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
@@ -220,15 +247,15 @@ export default function App() {
       a.click();
       a.remove();
       window.URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error(err);
-      alert("❌ Impossibile scaricare il file CSV.");
+    } catch (err) { 
+      alert("❌ Impossibile scaricare il file CSV."); 
     }
-  };
+  }, []);
 
-  const aggiungiAlCarrello = (item) => setCarrello(prev => [...prev, item]);
-  const rimuoviDalCarrello = (idUnivoco) => setCarrello(prev => prev.filter(item => item.idUnivoco !== idUnivoco));
-  const totaleCarrello = carrello.reduce((acc, item) => acc + item.prezzo, 0);
+  // 4. AZIONI CARRELLO
+  const aggiungiAlCarrello = useCallback((item) => setCarrello(prev => [...prev, item]), []);
+  const rimuoviDalCarrello = useCallback((idUnivoco) => setCarrello(prev => prev.filter(item => item.idUnivoco !== idUnivoco)), []);
+  const totaleCarrello = useMemo(() => carrello.reduce((acc, item) => acc + item.prezzo, 0), [carrello]);
 
   const gestisciCheckout = useCallback(async () => {
     setIsCheckout(true);
@@ -248,22 +275,22 @@ export default function App() {
       
       setCarrello([]); 
       await caricaOrdiniUtente(token);
-    } catch (error) {
-      console.error("Errore durante il checkout:", error);
-      alert("❌ Errore di connessione o sessione scaduta.");
-    } finally {
-      setIsCheckout(false);
+    } catch (error) { 
+      alert("❌ Errore di connessione o sessione scaduta."); 
+    } finally { 
+      setIsCheckout(false); 
     }
   }, [carrello, totaleCarrello, caricaOrdiniUtente]);
 
-  const gestisciLogout = () => {
+  const gestisciLogout = useCallback(() => {
     localStorage.removeItem('token');
-    setUtenteLoggato(null);
-    setOrdiniUtente([]);
-    setTuttiGliOrdiniAdmin([]);
+    setUtenteLoggato(null); 
+    setOrdiniUtente([]); 
+    setTuttiGliOrdiniAdmin([]); 
     setViewAdmin(false);
-  };
+  }, []);
 
+  // --- RENDER ---
   if (loading && !errore) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center">
@@ -295,20 +322,16 @@ export default function App() {
   return (
     <div className="min-h-screen p-6 md:p-12 font-sans text-white antialiased">
       <header className="max-w-5xl mx-auto bg-white/10 backdrop-blur-xl border border-white/20 p-8 rounded-3xl shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] mb-10 text-center relative">
-        <h1 className="text-4xl md:text-5xl font-black tracking-wider uppercase bg-gradient-to-r from-white via-blue-100 to-blue-200 bg-clip-text text-transparent drop-shadow-sm">
-          CNL Shop
-        </h1>
+        <h1 className="text-4xl md:text-5xl font-black tracking-wider uppercase bg-gradient-to-r from-white via-blue-100 to-blue-200 bg-clip-text text-transparent drop-shadow-sm">CNL Shop</h1>
         <p className="mt-3 text-blue-200/80 text-lg md:text-xl font-medium">Circolo Nuoto Lucca - Ordini Abbigliamento Sportivo</p>
-        
         <div className="mt-6 pt-4 border-t border-white/10 flex flex-col md:flex-row justify-between items-center gap-4">
-          <p className="text-sm text-white/70">
-            Accesso come <strong className="text-white">{utenteLoggato.nome}</strong>
+          <p className="text-sm text-white/70">Accesso come <strong className="text-white">{utenteLoggato.nome}</strong>
             {utenteLoggato.is_admin && <span className="text-xs ml-2 bg-amber-500/20 border border-amber-400/30 text-amber-300 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Staff</span>}
           </p>
           <div className="flex gap-3">
-            {utenteLoggato?.is_admin && (
+            {utenteLoggato.is_admin && (
               <button onClick={() => setViewAdmin(!viewAdmin)} className="text-xs bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-200 border border-cyan-500/30 px-4 py-1.5 rounded-full transition-colors font-bold uppercase tracking-wider">
-                {viewAdmin ? "Vedi Catalogo Prodotti" : "Torna a Gestione Ordini"}
+                {viewAdmin ? "Vedi Catalogo Pubblico" : "Pannello Staff"}
               </button>
             )}
             <button onClick={gestisciLogout} className="text-xs bg-red-500/20 hover:bg-red-500/40 text-red-200 border border-red-500/30 px-4 py-1.5 rounded-full transition-colors font-bold uppercase tracking-wider">Esci</button>
@@ -318,20 +341,16 @@ export default function App() {
       
       <main className="max-w-5xl mx-auto">
         {!viewAdmin ? (
-          /* --- VISTA NORMALE (NEGOZIO) --- */
           <>
             <h2 className="text-3xl font-bold text-white/90 tracking-wide mb-8 border-b border-white/10 pb-4">Catalogo Abbigliamento</h2>
             {errore ? <div className="bg-red-500/20 p-4 rounded-xl text-red-200">{errore}</div> : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                {prodotti.map(prodotto => (
-                  <ProdottoCard 
-                    key={prodotto.id} 
-                    prodotto={prodotto} 
-                    onAggiungi={aggiungiAlCarrello} 
-                    isUserAdmin={utenteLoggato.is_admin} 
-                  />
-                ))}
-              </div>
+              prodotti.length === 0 ? (
+                <p className="text-white/50 italic p-8 bg-white/5 rounded-xl border border-white/10 text-center">Il catalogo è attualmente vuoto. Contatta lo staff.</p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                  {prodotti.map(prodotto => <ProdottoCard key={prodotto.id} prodotto={prodotto} onAggiungi={aggiungiAlCarrello} isUserAdmin={utenteLoggato.is_admin} />)}
+                </div>
+              )
             )}
 
             {!utenteLoggato.is_admin && carrello.length > 0 && (
@@ -370,14 +389,14 @@ export default function App() {
                 {ordiniUtente.length === 0 ? <p className="text-white/50 text-center py-8 italic bg-white/5 rounded-2xl">Non hai ancora inviato nessun ordine.</p> : (
                   <div className="space-y-6">
                     {ordiniUtente.map((ord) => (
-                      <div key={ord.id} className="bg-white/5 border border-white/10 rounded-2xl p-6 shadow-md">
+                      <div key={`user-ord-${ord.id}`} className="bg-white/5 border border-white/10 rounded-2xl p-6 shadow-md">
                         <div className="flex justify-between items-center border-b border-white/10 pb-4 mb-4">
                           <h3 className="text-xl font-bold text-blue-200">Ordine #{ord.id}</h3>
                           <Badge className={`px-3 py-1 text-xs rounded-full border ${ord.stato_pagamento === 'In attesa' ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' : 'bg-green-500/20 text-green-300 border-green-500/30'}`}>{ord.stato_pagamento}</Badge>
                         </div>
                         <div className="divide-y divide-white/5 space-y-3">
                           {ord.articoli.map((art, idx) => (
-                            <div key={idx} className="pt-3 first:pt-0 flex justify-between items-center text-sm">
+                            <div key={`user-art-${idx}`} className="pt-3 first:pt-0 flex justify-between items-center text-sm">
                               <div>
                                 <p className="font-bold text-white/90">{art.nome_prodotto} <span className="text-xs text-white/40">({art.taglia})</span></p>
                                 <p className="text-xs text-white/60">Destinatario: <span className="text-white">{art.atleta}</span> {art.nome_personalizzato && <span> | Stampa: <span className="text-cyan-400">"{art.nome_personalizzato}"</span></span>}</p>
@@ -394,59 +413,110 @@ export default function App() {
             )}
           </>
         ) : (
-          /* --- VISTA ADMIN (STAFF) --- */
           <div className="space-y-8 animate-fadeIn">
-            <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-cyan-500/20 pb-4 gap-4">
-              <h2 className="text-3xl font-black text-cyan-400 tracking-wide">Pannello Gestione Ordini Globali</h2>
-              
-              {/* --- PULSANTE ESPORTAZIONE CSV --- */}
+            
+            <div className="flex gap-4 border-b border-white/10 pb-4">
               <button 
-                onClick={esportaCsvAdmin}
-                className="bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-200 border border-emerald-500/30 px-5 py-2.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 shadow-lg"
+                onClick={() => setAdminTab('ordini')} 
+                className={`px-5 py-2 rounded-xl font-bold transition-all ${adminTab === 'ordini' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-lg' : 'text-white/50 hover:bg-white/5'}`}
               >
-                📥 Scarica Report CSV per Fornitore
+                📦 Gestione Ordini
+              </button>
+              <button 
+                onClick={() => setAdminTab('catalogo')} 
+                className={`px-5 py-2 rounded-xl font-bold transition-all ${adminTab === 'catalogo' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-lg' : 'text-white/50 hover:bg-white/5'}`}
+              >
+                👕 Gestione Catalogo Prodotti
               </button>
             </div>
-            
-            {tuttiGliOrdiniAdmin.length === 0 ? <p className="text-white/50 text-center py-8 bg-white/5 rounded-2xl">Nessun ordine nel sistema.</p> : (
+
+            {adminTab === 'ordini' && (
               <div className="space-y-6">
-                {tuttiGliOrdiniAdmin.map((ord) => (
-                  <div key={ord.id} className="bg-slate-900/40 border border-cyan-500/20 rounded-3xl p-6 shadow-xl">
-                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-white/10 pb-4 mb-4 gap-4">
-                      <div>
-                        <span className="text-xs text-cyan-400 font-bold tracking-wider uppercase">Registrato</span>
-                        <h3 className="text-2xl font-black text-white">Ordine #{ord.id}</h3>
-                        <p className="text-xs text-white/60 mt-1">Inviato da: <span className="text-white font-semibold">{ord.acquirente}</span> ({ord.email_acquirente})</p>
-                      </div>
-                      <div className="flex items-center gap-4 w-full md:w-auto justify-between">
-                        <div className="text-right hidden sm:block">
-                          <span className="text-xs text-white/40 block">Totale</span>
-                          <span className="font-black text-xl text-cyan-300">€{ord.totale.toFixed(2)}</span>
+                <div className="flex justify-between items-center mb-6">
+                  <h2 className="text-2xl font-black text-white">Ordini Ricevuti</h2>
+                  <button onClick={esportaCsvAdmin} className="bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-200 border border-emerald-500/30 px-5 py-2 rounded-xl text-sm font-bold flex items-center gap-2">
+                    📥 Scarica CSV Fornitore
+                  </button>
+                </div>
+                {tuttiGliOrdiniAdmin.length === 0 ? <p className="text-white/50 text-center py-8 bg-white/5 rounded-2xl">Nessun ordine nel sistema.</p> : (
+                  tuttiGliOrdiniAdmin.map((ord) => (
+                    <div key={`admin-ord-${ord.id}`} className="bg-slate-900/40 border border-cyan-500/20 rounded-3xl p-6 shadow-xl">
+                      <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-white/10 pb-4 mb-4 gap-4">
+                        <div>
+                          <span className="text-xs text-cyan-400 font-bold tracking-wider uppercase">Registrato</span>
+                          <h3 className="text-2xl font-black text-white">Ordine #{ord.id}</h3>
+                          <p className="text-xs text-white/60 mt-1">Acquirente: <span className="text-white font-semibold">{ord.acquirente}</span> ({ord.email_acquirente})</p>
                         </div>
-                        <select 
-                          value={ord.stato_pagamento} 
-                          onChange={(e) => cambiaStatoOrdineAdmin(ord.id, e.target.value)}
-                          className="bg-slate-800 border border-white/20 rounded-xl p-2 text-sm text-white font-bold focus:outline-none focus:ring-2 focus:ring-cyan-400"
-                        >
-                          <option value="In attesa">In attesa</option>
-                          <option value="In lavorazione">In lavorazione</option>
-                          <option value="Pronto per il ritiro">Pronto per il ritiro</option>
-                          <option value="Completato">Completato</option>
-                        </select>
+                        <div className="flex items-center gap-4 w-full md:w-auto justify-between">
+                          <div className="text-right hidden sm:block">
+                            <span className="text-xs text-white/40 block">Totale</span>
+                            <span className="font-black text-xl text-cyan-300">€{ord.totale.toFixed(2)}</span>
+                          </div>
+                          <select value={ord.stato_pagamento} onChange={(e) => cambiaStatoOrdineAdmin(ord.id, e.target.value)} className="bg-slate-800 border border-white/20 rounded-xl p-2 text-sm text-white font-bold focus:outline-none focus:ring-2 focus:ring-cyan-400">
+                            <option value="In attesa">In attesa</option>
+                            <option value="In lavorazione">In lavorazione</option>
+                            <option value="Pronto per il ritiro">Pronto per il ritiro</option>
+                            <option value="Completato">Completato</option>
+                          </select>
+                        </div>
+                      </div>
+                      <div className="space-y-3 bg-white/5 p-4 rounded-xl border border-white/5">
+                        {ord.articoli.map((art, idx) => (
+                          <div key={`admin-art-${idx}`} className="flex justify-between items-center text-sm border-b border-white/5 pb-2 last:pb-0 last:border-0">
+                            <div>
+                              <p className="font-bold text-white">{art.nome_prodotto} - <span className="text-cyan-300">Taglia {art.taglia}</span></p>
+                              <p className="text-xs text-white/60">Atleta: <span className="text-white font-semibold">{art.atleta}</span> {art.nome_personalizzato && ` | Stampa: "${art.nome_personalizzato}"`}</p>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                    <div className="space-y-3 bg-white/5 p-4 rounded-xl border border-white/5">
-                      {ord.articoli.map((art, idx) => (
-                        <div key={idx} className="flex justify-between items-center text-sm border-b border-white/5 pb-2 last:pb-0 last:border-0">
+                  ))
+                )}
+              </div>
+            )}
+
+            {adminTab === 'catalogo' && (
+              <div className="space-y-8">
+                <div className="bg-white/5 p-6 rounded-2xl border border-white/10">
+                  <h3 className="text-xl font-bold text-white mb-4">Aggiungi Nuovo Prodotto</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                    <div className="md:col-span-2">
+                      <label className="text-xs text-white/70 mb-1 block">Nome Prodotto</label>
+                      <input type="text" value={nuovoProd.nome} onChange={e => setNuovoProd({...nuovoProd, nome: e.target.value})} className="w-full bg-slate-800 border border-white/20 rounded-xl p-2.5 text-white" placeholder="Es. T-Shirt Rappresentanza"/>
+                    </div>
+                    <div>
+                      <label className="text-xs text-white/70 mb-1 block">Prezzo (€)</label>
+                      <input type="number" step="0.01" value={nuovoProd.prezzo} onChange={e => setNuovoProd({...nuovoProd, prezzo: e.target.value})} className="w-full bg-slate-800 border border-white/20 rounded-xl p-2.5 text-white" placeholder="0.00"/>
+                    </div>
+                    <div className="flex items-center gap-3 pb-3">
+                      <input type="checkbox" id="pers" checked={nuovoProd.personalizzabile} onChange={e => setNuovoProd({...nuovoProd, personalizzabile: e.target.checked})} className="w-5 h-5 accent-cyan-500 rounded cursor-pointer"/>
+                      <label htmlFor="pers" className="text-sm font-semibold text-white/90 cursor-pointer">Stampa retro</label>
+                    </div>
+                  </div>
+                  <Button onClick={creaProdottoAdmin} className="mt-5 w-full md:w-auto bg-amber-500 hover:bg-amber-600 text-slate-900 font-black rounded-xl px-8 py-2.5 shadow-lg shadow-amber-500/20">
+                    + Salva Prodotto nel Catalogo
+                  </Button>
+                </div>
+
+                <div>
+                  <h3 className="text-xl font-bold text-white mb-4">Prodotti nel Database ({prodotti.length})</h3>
+                  {prodotti.length === 0 ? <p className="text-white/50 text-sm">Nessun prodotto trovato. Inizia ad aggiungerli!</p> : (
+                    <div className="space-y-3">
+                      {prodotti.map(p => (
+                        <div key={`cat-prod-${p.id}`} className="flex justify-between items-center bg-slate-900/50 p-4 rounded-xl border border-white/5 hover:border-white/10 transition-colors">
                           <div>
-                            <p className="font-bold text-white">{art.nome_prodotto} - <span className="text-cyan-300">Taglia {art.taglia}</span></p>
-                            <p className="text-xs text-white/60">Atleta: <span className="text-white font-semibold">{art.atleta}</span> {art.nome_personalizzato && ` | Stampa: "${art.nome_personalizzato}"`}</p>
+                            <p className="font-bold text-white text-lg">{p.nome} <span className="text-cyan-300 ml-2">€{p.prezzo.toFixed(2)}</span></p>
+                            {p.personalizzabile && <span className="text-xs text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full mt-1 inline-block border border-amber-500/20">Personalizzabile</span>}
                           </div>
+                          <button onClick={() => eliminaProdottoAdmin(p.id)} className="bg-red-500/20 text-red-300 border border-red-500/30 hover:bg-red-500/40 px-4 py-2 rounded-lg text-sm font-bold transition-colors">
+                            Elimina
+                          </button>
                         </div>
                       ))}
                     </div>
-                  </div>
-                ))}
+                  )}
+                </div>
               </div>
             )}
           </div>
