@@ -4,7 +4,7 @@ import { Button } from "./components/ui/Button";
 import { Badge } from "./components/ui/Badge";
 import Auth from './Auth';
 
-// 🔗 INSERISCI QUI IL LINK PAYPAL REALE DELLA PALLANUOTO LUCCA
+// 🔗 LINK PAYPAL DELLA SQUADRA
 const PAYPAL_LINK_PALLANUOTO = "https://paypal.me/pallanuotolucca?country.x=IT&locale.x=it_IT";
 
 // --- COMPONENTE PRODOTTO ---
@@ -263,7 +263,6 @@ export default function App() {
   const rimuoviDalCarrello = useCallback((idUnivoco) => setCarrello(prev => prev.filter(item => item.idUnivoco !== idUnivoco)), []);
   const totaleCarrello = useMemo(() => carrello.reduce((acc, item) => acc + item.prezzo, 0), [carrello]);
 
-  // MODIFICATO: Salva l'ordine nel DB e poi apre il link PayPal della squadra
   const gestisciCheckout = useCallback(async () => {
     setIsCheckout(true);
     try {
@@ -279,14 +278,11 @@ export default function App() {
       if (!response.ok) throw new Error("Errore salvataggio");
       const data = await response.json();
       
-      // Messaggio di conferma del salvataggio nel database
       alert(`✅ Ordine #${data.ordine_id} registrato nel sistema!\nAdesso verrai reindirizzato su PayPal per completare il pagamento.`);
       
-      // Svuota il carrello dell'interfaccia e rinfresca lo storico
       setCarrello([]); 
       await caricaOrdiniUtente(token);
 
-      // Reindirizzamento sicuro al canale PayPal in una nuova scheda
       window.open(PAYPAL_LINK_PALLANUOTO, '_blank', 'noopener,noreferrer');
       
     } catch (error) { 
@@ -572,7 +568,7 @@ export default function App() {
                       <input type="number" step="0.01" value={nuovoProd.prezzo} onChange={e => setNuovoProd({...nuovoProd, prezzo: e.target.value})} className="w-full bg-slate-800 border border-white/20 rounded-xl p-2.5 text-white" placeholder="0.00"/>
                     </div>
                     <div className="flex items-center gap-3 pb-3">
-                      <input type="checkbox" id="pers" checked={nuovoProd.personalizzabile} onChange={e => setUtenteLoggato({...nuovoProd, personalizzabile: e.target.checked})} className="w-5 h-5 accent-cyan-500 rounded cursor-pointer"/>
+                      <input type="checkbox" id="pers" checked={nuovoProd.personalizzabile} onChange={e => setNuovoProd({...nuovoProd, personalizzabile: e.target.checked})} className="w-5 h-5 accent-cyan-500 rounded cursor-pointer"/>
                       <label htmlFor="pers" className="text-sm font-semibold text-white/90 cursor-pointer">Stampa retro</label>
                     </div>
                   </div>
