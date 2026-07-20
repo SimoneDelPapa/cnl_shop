@@ -34,7 +34,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/login")
 
-# --- CONFIGURAZIONE PASSWORD HASHING (NATIVA CON BCRYPT) ---
+# --- CONFIGURAZIONE PASSWORD HASHING ---
 def get_password_hash(password: str) -> str:
     pwd_bytes = password.encode('utf-8')
     salt = bcrypt.gensalt()
@@ -53,7 +53,7 @@ def create_access_token(data: dict):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-# --- MODELLI DATABASE (Tabelle) ---
+# --- MODELLI DATABASE ---
 class Utente(Base):
     __tablename__ = "utenti"
     id = Column(Integer, primary_key=True, index=True)
@@ -61,6 +61,7 @@ class Utente(Base):
     nome = Column(String, nullable=False)
     hashed_password = Column(String, nullable=False)
     is_attivo = Column(Boolean, default=True)
+    is_admin = Column(Boolean, default=False) # <-- NUOVO CAMPO: Ruolo Amministratore
 
 class Ordine(Base):
     __tablename__ = "ordini"
@@ -70,6 +71,7 @@ class Ordine(Base):
     utente_id = Column(Integer, ForeignKey("utenti.id"), nullable=True) 
     
     articoli = relationship("ArticoloOrdine", back_populates="ordine")
+    utente = relationship("Utente") # <-- NUOVA RELAZIONE per vedere chi ha fatto l'ordine
 
 class ArticoloOrdine(Base):
     __tablename__ = "articoli_ordine"
@@ -101,6 +103,7 @@ class UtenteResponse(BaseModel):
     email: EmailStr
     nome: str
     is_attivo: bool
+    is_admin: bool # <-- ESPONIAMO IL RUOLO AL FRONTEND
 
     class Config:
         from_attributes = True
@@ -120,6 +123,9 @@ class ArticoloCarrello(BaseModel):
 class OrdineCreate(BaseModel):
     totale: float
     carrello: List[ArticoloCarrello]
+
+class UpdateStatoOrdine(BaseModel):
+    stato_pagamento: str
 
 # --- INIZIALIZZAZIONE FASTAPI ---
 app = FastAPI(title="CNL Shop API")
@@ -142,7 +148,7 @@ def get_db():
     finally:
         db.close()
 
-# --- DIPENDENZA: Verifica chi è l'utente loggato ---
+# --- DIPENDENZE AUTENTICAZIONE ---
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -162,8 +168,12 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         raise credentials_exception
     return user
 
+def get_current_admin(current_user: Utente = Depends(get_current_user)):
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Accesso negato. Solo Staff.")
+    return current_user
 
-# --- ROTTE API ---
+# --- ROTTE API UTENTI & ORDINI ---
 
 @app.post("/api/register", response_model=UtenteResponse, status_code=status.HTTP_201_CREATED)
 def registra_utente(utente: UtenteCreate, db: Session = Depends(get_db)):
@@ -179,31 +189,22 @@ def registra_utente(utente: UtenteCreate, db: Session = Depends(get_db)):
     db.refresh(nuovo_utente)
     return nuovo_utente
 
-
 @app.post("/api/login")
 def login_utente(credenziali: UtenteLogin, db: Session = Depends(get_db)):
     utente = db.query(Utente).filter(Utente.email == credenziali.email).first()
-    
     if not utente or not verify_password(credenziali.password, utente.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Email o password errati",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Email o password errati")
     
     access_token = create_access_token(data={"sub": str(utente.id)})
-    
     return {
         "access_token": access_token, 
         "token_type": "bearer",
-        "utente": {"id": utente.id, "email": utente.email, "nome": utente.nome}
+        "utente": {"id": utente.id, "email": utente.email, "nome": utente.nome, "is_admin": utente.is_admin}
     }
-
 
 @app.get("/api/users/me", response_model=UtenteResponse)
 def ottieni_utente_corrente(current_user: Utente = Depends(get_current_user)):
     return current_user
-
 
 @app.get("/api/products")
 def get_products():
@@ -236,36 +237,44 @@ def crea_ordine(ordine_in: OrdineCreate, db: Session = Depends(get_db), current_
         
         db.commit()
         return {"messaggio": "Ordine salvato", "ordine_id": nuovo_ordine.id}
-        
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
 
-# NUOVA ROTTA: Recupera lo storico ordini dell'utente loggato
 @app.get("/api/orders/my-orders")
 def ottieni_ordini_utente(db: Session = Depends(get_db), current_user: Utente = Depends(get_current_user)):
-    ordini = db.query(Ordine)\
-               .filter(Ordine.utente_id == current_user.id)\
-               .options(joinedload(Ordine.articoli))\
-               .order_by(Ordine.id.desc())\
-               .all()
-    
+    ordini = db.query(Ordine).filter(Ordine.utente_id == current_user.id).options(joinedload(Ordine.articoli)).order_by(Ordine.id.desc()).all()
+    risposta = []
+    for o in ordini:
+        risposta.append({
+            "id": o.id, "totale": o.totale, "stato_pagamento": o.stato_pagamento,
+            "articoli": [{"prodotto_id": art.prodotto_id, "nome_prodotto": art.nome_prodotto, "prezzo": art.prezzo, "atleta": art.atleta, "taglia": art.taglia, "nome_personalizzato": art.nome_personalizzato} for art in o.articoli]
+        })
+    return risposta
+
+# --- NUOVE ROTTE ESCLUSIVE ADMIN ---
+
+@app.get("/api/admin/orders")
+def admin_ottieni_tutti_gli_ordini(db: Session = Depends(get_db), admin_user: Utente = Depends(get_current_admin)):
+    ordini = db.query(Ordine).options(joinedload(Ordine.articoli), joinedload(Ordine.utente)).order_by(Ordine.id.desc()).all()
     risposta = []
     for o in ordini:
         risposta.append({
             "id": o.id,
             "totale": o.totale,
             "stato_pagamento": o.stato_pagamento,
-            "articoli": [
-                {
-                    "prodotto_id": art.prodotto_id,
-                    "nome_prodotto": art.nome_prodotto,
-                    "prezzo": art.prezzo,
-                    "atleta": art.atleta,
-                    "taglia": art.taglia,
-                    "nome_personalizzato": art.nome_personalizzato
-                } for art in o.articoli
-            ]
+            "acquirente": o.utente.nome if o.utente else "Sconosciuto",
+            "email_acquirente": o.utente.email if o.utente else "Sconosciuta",
+            "articoli": [{"nome_prodotto": art.nome_prodotto, "prezzo": art.prezzo, "atleta": art.atleta, "taglia": art.taglia, "nome_personalizzato": art.nome_personalizzato} for art in o.articoli]
         })
-    
     return risposta
+
+@app.patch("/api/admin/orders/{ordine_id}")
+def admin_aggiorna_stato_ordine(ordine_id: int, payload: UpdateStatoOrdine, db: Session = Depends(get_db), admin_user: Utente = Depends(get_current_admin)):
+    ordine = db.query(Ordine).filter(Ordine.id == ordine_id).first()
+    if not ordine:
+        raise HTTPException(status_code=404, detail="Ordine non trovato")
+    
+    ordine.stato_pagamento = payload.stato_pagamento
+    db.commit()
+    return {"messaggio": "Stato aggiornato con successo"}

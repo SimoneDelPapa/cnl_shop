@@ -1,10 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./components/ui/Card"
 import { Button } from "./components/ui/Button"
 import { Badge } from "./components/ui/Badge"
 import Auth from './Auth'
 
-// 1. COMPONENTE PER IL SINGOLO PRODOTTO
 function ProdottoCard({ prodotto, onAggiungi }) {
   const [atleta, setAtleta] = useState('')
   const [taglia, setTaglia] = useState('M')
@@ -26,6 +25,7 @@ function ProdottoCard({ prodotto, onAggiungi }) {
       nomePersonalizzato: prodotto.personalizzabile ? nomePers.trim() : null
     })
     
+    setAtleta('')
     setNomePers('')
   }
 
@@ -52,45 +52,32 @@ function ProdottoCard({ prodotto, onAggiungi }) {
           <div>
             <label className="text-xs text-white/70 font-semibold mb-1 block">Nome Atleta (chi lo indossa)</label>
             <input 
-              type="text" 
-              value={atleta}
-              onChange={e => setAtleta(e.target.value)}
-              placeholder="Es. Giulia"
+              type="text" value={atleta} onChange={e => setAtleta(e.target.value)} placeholder="Es. Giulia"
               className="w-full bg-white/5 border border-white/20 rounded-lg p-2 text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-400"
             />
           </div>
-
           <div>
             <label className="text-xs text-white/70 font-semibold mb-1 block">Taglia</label>
             <select 
-              value={taglia}
-              onChange={e => setTaglia(e.target.value)}
+              value={taglia} onChange={e => setTaglia(e.target.value)}
               className="w-full bg-white/5 border border-white/20 rounded-lg p-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-400 [&>option]:text-slate-900 appearance-none"
             >
-              <option value="S">S</option>
-              <option value="M">M</option>
-              <option value="L">L</option>
-              <option value="XL">XL</option>
+              <option value="S">S</option><option value="M">M</option><option value="L">L</option><option value="XL">XL</option>
             </select>
           </div>
-
           {prodotto.personalizzabile && (
             <div>
               <label className="text-xs text-white/70 font-semibold mb-1 block">Testo Personalizzato</label>
               <input 
-                type="text" 
-                value={nomePers}
-                onChange={e => setNomePers(e.target.value.toUpperCase())}
-                placeholder="Es. GIULIA 10"
+                type="text" value={nomePers} onChange={e => setNomePers(e.target.value.toUpperCase())} placeholder="Es. GIULIA 10"
                 className="w-full bg-white/5 border border-white/20 rounded-lg p-2 text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-400 font-bold"
               />
             </div>
           )}
         </div>
       </CardContent>
-      
       <CardFooter className="pt-4">
-        <Button onClick={handleAdd} className="w-full font-bold bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white border border-white/10 shadow-[0_4px_12px_rgba(59,130,246,0.3)] hover:shadow-[0_4px_20px_rgba(59,130,246,0.5)] transition-all rounded-xl py-5">
+        <Button onClick={handleAdd} className="w-full font-bold bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white border border-white/10 shadow-[0_4px_12px_rgba(59,130,246,0.3)] transition-all rounded-xl py-5">
           Aggiungi al carrello
         </Button>
       </CardFooter>
@@ -98,130 +85,149 @@ function ProdottoCard({ prodotto, onAggiungi }) {
   )
 }
 
-// 2. APPLICAZIONE PRINCIPALE
 export default function App() {
   const [utenteLoggato, setUtenteLoggato] = useState(null)
   const [prodotti, setProdotti] = useState([])
   const [carrello, setCarrello] = useState([])
   const [ordiniUtente, setOrdiniUtente] = useState([])
+  const [tuttiGliOrdiniAdmin, setTuttiGliOrdiniAdmin] = useState([])
   const [loading, setLoading] = useState(true)
   const [errore, setErrore] = useState(null)
   const [isCheckout, setIsCheckout] = useState(false) 
+  const [viewAdmin, setViewAdmin] = useState(false)
 
-  useEffect(() => {
-    const caricaProdotti = () => {
-      fetch('https://cnl-shop-backend.onrender.com/api/products')
-        .then(res => {
-          if (!res.ok) throw new Error("Errore server")
-          return res.json()
-        })
-        .then(data => {
-          setProdotti(data)
-          setLoading(false)
-        })
-        .catch(err => {
-          console.error("ERRORE DI RETE:", err)
-          setErrore("Impossibile collegarsi al backend.")
-          setLoading(false)
-        })
+  // 1. Funzioni globali di caricamento definite con useCallback
+  const caricaProdotti = useCallback(async () => {
+    try {
+      const res = await fetch('https://cnl-shop-backend.onrender.com/api/products');
+      if (!res.ok) throw new Error("Errore server");
+      const data = await res.json();
+      setProdotti(data);
+    } catch (err) {
+      setErrore("Impossibile collegarsi al backend.");
+    } finally {
+      setLoading(false);
     }
+  }, []);
 
-    const caricaOrdiniUtente = (tokenFisico) => {
-      fetch('https://cnl-shop-backend.onrender.com/api/orders/my-orders', {
-        method: 'GET',
+  const caricaOrdiniUtente = useCallback(async (tokenFisico) => {
+    try {
+      const res = await fetch('https://cnl-shop-backend.onrender.com/api/orders/my-orders', {
         headers: { 'Authorization': `Bearer ${tokenFisico}` }
-      })
-      .then(res => res.json())
-      .then(data => {
-        setOrdiniUtente(data)
-      })
-      .catch(err => console.error("Errore nel caricamento ordini storici:", err))
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setOrdiniUtente(data);
+      }
+    } catch (err) {
+      console.error(err);
     }
+  }, []);
 
-    const token = localStorage.getItem('token')
-    
-    if (token) {
-      fetch('https://cnl-shop-backend.onrender.com/api/users/me', {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${token}` }
-      })
-      .then(res => {
-        if (!res.ok) throw new Error("Token scaduto o non valido")
-        return res.json()
-      })
-      .then(datiUtente => {
-        setUtenteLoggato(datiUtente)
-        caricaOrdiniUtente(token)
-      })
-      .catch(err => {
-        console.warn("Sessione scaduta:", err.message)
-        localStorage.removeItem('token')
-      })
-      .finally(() => {
-        caricaProdotti()
-      })
-    } else {
-      caricaProdotti()
+  const caricaOrdiniGlobaliAdmin = useCallback(async (tokenFisico) => {
+    try {
+      const res = await fetch('https://cnl-shop-backend.onrender.com/api/admin/orders', {
+        headers: { 'Authorization': `Bearer ${tokenFisico}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setTuttiGliOrdiniAdmin(data);
+      }
+    } catch (err) {
+      console.error(err);
     }
-  }, [])
+  }, []);
 
-  const aggiungiAlCarrello = (item) => {
-    setCarrello([...carrello, item])
-  }
+  // 2. Controllo Sessione Iniziale
+  useEffect(() => {
+    const initApp = async () => {
+      const token = localStorage.getItem('token');
+      if (token) {
+        try {
+          const res = await fetch('https://cnl-shop-backend.onrender.com/api/users/me', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (!res.ok) throw new Error("Token non valido");
+          
+          const datiUtente = await res.json();
+          setUtenteLoggato(datiUtente);
+          
+          await caricaOrdiniUtente(token);
+          if (datiUtente.is_admin) {
+            await caricaOrdiniGlobaliAdmin(token);
+          }
+        } catch (error) {
+          console.warn("Sessione scaduta:", error.message);
+          localStorage.removeItem('token');
+        }
+      }
+      await caricaProdotti();
+    };
 
-  const rimuoviDalCarrello = (idUnivoco) => {
-    setCarrello(carrello.filter(item => item.idUnivoco !== idUnivoco))
-  }
+    initApp();
+  }, [caricaProdotti, caricaOrdiniUtente, caricaOrdiniGlobaliAdmin]);
 
+  // 3. Funzioni operative
+  const cambiaStatoOrdineAdmin = useCallback(async (ordineId, nuovoStato) => {
+    const token = localStorage.getItem('token');
+    try {
+      const response = await fetch(`https://cnl-shop-backend.onrender.com/api/admin/orders/${ordineId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ stato_pagamento: nuovoStato })
+      });
+      if (response.ok) {
+        caricaOrdiniGlobaliAdmin(token);
+      }
+    } catch (err) { 
+      console.error(err); 
+    }
+  }, [caricaOrdiniGlobaliAdmin]);
+
+  // Usiamo il setter funzionale per il carrello così non dobbiamo inserirlo nelle dipendenze
+  const aggiungiAlCarrello = (item) => setCarrello(prev => [...prev, item])
+  const rimuoviDalCarrello = (idUnivoco) => setCarrello(prev => prev.filter(item => item.idUnivoco !== idUnivoco))
   const totaleCarrello = carrello.reduce((acc, item) => acc + item.prezzo, 0)
 
-  const gestisciCheckout = async () => {
+  const gestisciCheckout = useCallback(async () => {
     setIsCheckout(true)
     try {
       const token = localStorage.getItem('token'); 
+      if (!token) throw new Error("Token mancante");
 
       const response = await fetch('https://cnl-shop-backend.onrender.com/api/orders', {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          totale: totaleCarrello,
-          carrello: carrello
-        }),
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ totale: totaleCarrello, carrello: carrello }),
       });
 
-      if (!response.ok) throw new Error("Errore durante il salvataggio");
-      
+      if (!response.ok) throw new Error("Errore salvataggio");
       const data = await response.json();
-      alert(`✅ Ordine #${data.ordine_id} salvato correttamente nel database!\n\nTotale: €${totaleCarrello.toFixed(2)}`);
+      alert(`✅ Ordine #${data.ordine_id} salvato correttamente!`);
       
       setCarrello([]); 
+      await caricaOrdiniUtente(token);
 
-      const aggiornaOrdini = await fetch('https://cnl-shop-backend.onrender.com/api/orders/my-orders', {
-        method: 'GET',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (aggiornaOrdini.ok) {
-        const nuoviOrdini = await aggiornaOrdini.json();
-        setOrdiniUtente(nuoviOrdini);
+      if (utenteLoggato?.is_admin) {
+        await caricaOrdiniGlobaliAdmin(token);
       }
-      
     } catch (error) {
-      console.error("Errore:", error);
-      alert("❌ Errore di connessione o sessione scaduta. Riprova a fare l'accesso.");
+      console.error("Errore durante il checkout:", error);
+      alert("❌ Errore di connessione o sessione scaduta.");
     } finally {
       setIsCheckout(false)
     }
-  }
+  }, [carrello, totaleCarrello, utenteLoggato, caricaOrdiniUtente, caricaOrdiniGlobaliAdmin]);
 
   const gestisciLogout = () => {
     localStorage.removeItem('token')
     setUtenteLoggato(null)
     setOrdiniUtente([])
+    setTuttiGliOrdiniAdmin([])
+    setViewAdmin(false)
   }
 
+  // --- RENDERING ---
   if (loading && !errore) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center">
@@ -238,10 +244,8 @@ export default function App() {
           setUtenteLoggato(datiUtente)
           const t = localStorage.getItem('token')
           if(t) {
-            fetch('https://cnl-shop-backend.onrender.com/api/orders/my-orders', {
-              method: 'GET',
-              headers: { 'Authorization': `Bearer ${t}` }
-            }).then(r => r.json()).then(d => setOrdiniUtente(d))
+            caricaOrdiniUtente(t)
+            if (datiUtente.is_admin) caricaOrdiniGlobaliAdmin(t)
           }
         }} />
       </div>
@@ -254,131 +258,139 @@ export default function App() {
         <h1 className="text-4xl md:text-5xl font-black tracking-wider uppercase bg-gradient-to-r from-white via-blue-100 to-blue-200 bg-clip-text text-transparent drop-shadow-sm">
           CNL Shop
         </h1>
-        <p className="mt-3 text-blue-200/80 text-lg md:text-xl font-medium">
-          Circolo Nuoto Lucca - Ordini Abbigliamento Sportivo
-        </p>
+        <p className="mt-3 text-blue-200/80 text-lg md:text-xl font-medium">Circolo Nuoto Lucca - Ordini Abbigliamento Sportivo</p>
         
-        <div className="mt-6 pt-4 border-t border-white/10 flex flex-col md:flex-row justify-center items-center gap-4">
+        <div className="mt-6 pt-4 border-t border-white/10 flex flex-col md:flex-row justify-between items-center gap-4">
           <p className="text-sm text-white/70">
-            Accesso effettuato come <strong className="text-white">{utenteLoggato.nome}</strong> ({utenteLoggato.email})
+            Accesso come <strong className="text-white">{utenteLoggato.nome}</strong>
           </p>
-          <button 
-            onClick={gestisciLogout}
-            className="text-xs bg-red-500/20 hover:bg-red-500/40 text-red-200 border border-red-500/30 px-4 py-1.5 rounded-full transition-colors font-bold uppercase tracking-wider"
-          >
-            Esci
-          </button>
+          <div className="flex gap-3">
+            {utenteLoggato?.is_admin && (
+              <button onClick={() => setViewAdmin(!viewAdmin)} className="text-xs bg-cyan-500/20 hover:bg-cyan-500/40 text-cyan-200 border border-cyan-500/30 px-4 py-1.5 rounded-full transition-colors font-bold uppercase tracking-wider">
+                {viewAdmin ? "Torna al Negozio" : "Pannello Staff"}
+              </button>
+            )}
+            <button onClick={gestisciLogout} className="text-xs bg-red-500/20 hover:bg-red-500/40 text-red-200 border border-red-500/30 px-4 py-1.5 rounded-full transition-colors font-bold uppercase tracking-wider">Esci</button>
+          </div>
         </div>
       </header>
       
       <main className="max-w-5xl mx-auto">
-        <h2 className="text-3xl font-bold text-white/90 tracking-wide mb-8 border-b border-white/10 pb-4">Catalogo</h2>
-        
-        {errore ? (
-           <div className="bg-red-500/20 backdrop-blur-md border border-red-500/30 p-4 rounded-xl text-red-200">{errore}</div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {prodotti.map(prodotto => (
-              <ProdottoCard key={prodotto.id} prodotto={prodotto} onAggiungi={aggiungiAlCarrello} />
-            ))}
-          </div>
-        )}
-
-        {carrello.length > 0 && (
-          <div className="mt-16 bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-8 shadow-2xl">
-            <h2 className="text-2xl font-bold text-white mb-6">Il tuo ordine attuale</h2>
-            
-            <div className="space-y-4 mb-8">
-              {carrello.map((item) => (
-                <div key={item.idUnivoco} className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white/5 border border-white/10 rounded-xl p-4">
-                  <div>
-                    <h4 className="font-bold text-lg text-blue-100">{item.nomeProdotto}</h4>
-                    <p className="text-sm text-white/70">
-                      Atleta: <span className="font-semibold text-white">{item.atleta}</span> | Taglia: <span className="font-semibold text-white">{item.taglia}</span>
-                    </p>
-                    {item.nomePersonalizzato && (
-                      <p className="text-sm text-cyan-300 mt-1">Stampa: "{item.nomePersonalizzato}"</p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-6 mt-4 md:mt-0 w-full md:w-auto justify-between">
-                    <span className="font-black text-xl">€{item.prezzo.toFixed(2)}</span>
-                    <button onClick={() => rimuoviDalCarrello(item.idUnivoco)} className="text-red-400 hover:text-red-300 font-bold text-sm bg-red-500/10 hover:bg-red-500/20 px-3 py-1 rounded-md transition-colors">
-                      Rimuovi
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex flex-col md:flex-row justify-between items-center border-t border-white/10 pt-6 gap-6">
-              <div className="text-center md:text-left">
-                <p className="text-white/70 font-medium">Totale complessivo</p>
-                <p className="text-4xl font-black bg-gradient-to-r from-white to-blue-200 bg-clip-text text-transparent">€{totaleCarrello.toFixed(2)}</p>
+        {!viewAdmin ? (
+          /* --- VISTA NORMALE (NEGOZIO) --- */
+          <>
+            <h2 className="text-3xl font-bold text-white/90 tracking-wide mb-8 border-b border-white/10 pb-4">Catalogo</h2>
+            {errore ? <div className="bg-red-500/20 p-4 rounded-xl text-red-200">{errore}</div> : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+                {prodotti.map(prodotto => <ProdottoCard key={prodotto.id} prodotto={prodotto} onAggiungi={aggiungiAlCarrello} />)}
               </div>
-              <Button 
-                onClick={gestisciCheckout} 
-                disabled={isCheckout}
-                className="w-full md:w-auto px-10 py-6 text-lg font-bold bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white rounded-xl shadow-lg hover:shadow-green-500/20 transition-all border border-green-400/30 disabled:opacity-50"
-              >
-                {isCheckout ? "Salvataggio..." : "Procedi al Pagamento"}
-              </Button>
+            )}
+
+            {carrello.length > 0 && (
+              <div className="mt-16 bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-8 shadow-2xl">
+                <h2 className="text-2xl font-bold text-white mb-6">Il tuo ordine attuale</h2>
+                <div className="space-y-4 mb-8">
+                  {carrello.map((item) => (
+                    <div key={item.idUnivoco} className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white/5 border border-white/10 rounded-xl p-4">
+                      <div>
+                        <h4 className="font-bold text-lg text-blue-100">{item.nomeProdotto}</h4>
+                        <p className="text-sm text-white/70">Atleta: <span className="font-semibold text-white">{item.atleta}</span> | Taglia: <span className="font-semibold text-white">{item.taglia}</span></p>
+                        {item.nomePersonalizzato && <p className="text-sm text-cyan-300 mt-1">Stampa: "{item.nomePersonalizzato}"</p>}
+                      </div>
+                      <div className="flex items-center gap-6 mt-4 md:mt-0 w-full md:w-auto justify-between">
+                        <span className="font-black text-xl">€{item.prezzo.toFixed(2)}</span>
+                        <button onClick={() => rimuoviDalCarrello(item.idUnivoco)} className="text-red-400 font-bold text-sm bg-red-500/10 px-3 py-1 rounded-md">Rimuovi</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-col md:flex-row justify-between items-center border-t border-white/10 pt-6 gap-6">
+                  <div className="text-center md:text-left">
+                    <p className="text-white/70 font-medium">Totale complessivo</p>
+                    <p className="text-4xl font-black bg-gradient-to-r from-white to-blue-200 bg-clip-text text-transparent">€{totaleCarrello.toFixed(2)}</p>
+                  </div>
+                  <Button onClick={gestisciCheckout} disabled={isCheckout} className="w-full md:w-auto px-10 py-6 text-lg font-bold bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl">
+                    {isCheckout ? "Salvataggio..." : "Procedi al Pagamento"}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-20 border-t border-white/10 pt-10">
+              <h2 className="text-3xl font-bold text-white/90 tracking-wide mb-8">I Miei Ordini Inviati</h2>
+              {ordiniUtente.length === 0 ? <p className="text-white/50 text-center py-8 italic bg-white/5 rounded-2xl">Non hai ancora inviato nessun ordine.</p> : (
+                <div className="space-y-6">
+                  {ordiniUtente.map((ord) => (
+                    <div key={ord.id} className="bg-white/5 border border-white/10 rounded-2xl p-6 shadow-md">
+                      <div className="flex justify-between items-center border-b border-white/10 pb-4 mb-4">
+                        <h3 className="text-xl font-bold text-blue-200">Ordine #{ord.id}</h3>
+                        <Badge className={`px-3 py-1 text-xs rounded-full border ${ord.stato_pagamento === 'In attesa' ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' : 'bg-green-500/20 text-green-300 border-green-500/30'}`}>{ord.stato_pagamento}</Badge>
+                      </div>
+                      <div className="divide-y divide-white/5 space-y-3">
+                        {ord.articoli.map((art, idx) => (
+                          <div key={idx} className="pt-3 first:pt-0 flex justify-between items-center text-sm">
+                            <div>
+                              <p className="font-bold text-white/90">{art.nome_prodotto} <span className="text-xs text-white/40">({art.taglia})</span></p>
+                              <p className="text-xs text-white/60">Destinatario: <span className="text-white">{art.atleta}</span> {art.nome_personalizzato && <span> | Stampa: <span className="text-cyan-400">"{art.nome_personalizzato}"</span></span>}</p>
+                            </div>
+                            <span className="font-semibold text-white/80">€{art.prezzo.toFixed(2)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
+          </>
+        ) : (
+          /* --- VISTA ADMIN (STAFF) --- */
+          <div className="space-y-8 animate-fadeIn">
+            <h2 className="text-3xl font-black text-cyan-400 tracking-wide border-b border-cyan-500/20 pb-4">Pannello Gestione Ordini (Staff)</h2>
+            {tuttiGliOrdiniAdmin.length === 0 ? <p className="text-white/50 text-center py-8 bg-white/5 rounded-2xl">Nessun ordine nel sistema.</p> : (
+              <div className="space-y-6">
+                {tuttiGliOrdiniAdmin.map((ord) => (
+                  <div key={ord.id} className="bg-slate-900/40 border border-cyan-500/20 rounded-3xl p-6 shadow-xl">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-white/10 pb-4 mb-4 gap-4">
+                      <div>
+                        <span className="text-xs text-cyan-400 font-bold tracking-wider uppercase">Registrato</span>
+                        <h3 className="text-2xl font-black text-white">Ordine #{ord.id}</h3>
+                        <p className="text-xs text-white/60 mt-1">Inviato da: <span className="text-white font-semibold">{ord.acquirente}</span> ({ord.email_acquirente})</p>
+                      </div>
+                      <div className="flex items-center gap-4 w-full md:w-auto justify-between">
+                        <div className="text-right hidden sm:block">
+                          <span className="text-xs text-white/40 block">Totale</span>
+                          <span className="font-black text-xl text-cyan-300">€{ord.totale.toFixed(2)}</span>
+                        </div>
+                        {/* SELECT PER CAMBIARE LO STATO IN TEMPO REALE */}
+                        <select 
+                          value={ord.stato_pagamento} 
+                          onChange={(e) => cambiaStatoOrdineAdmin(ord.id, e.target.value)}
+                          className="bg-slate-800 border border-white/20 rounded-xl p-2 text-sm text-white font-bold focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                        >
+                          <option value="In attesa">In attesa</option>
+                          <option value="In lavorazione">In lavorazione</option>
+                          <option value="Pronto per il ritiro">Pronto per il ritiro</option>
+                          <option value="Completato">Completato</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="space-y-3 bg-white/5 p-4 rounded-xl border border-white/5">
+                      {ord.articoli.map((art, idx) => (
+                        <div key={idx} className="flex justify-between items-center text-sm border-b border-white/5 pb-2 last:pb-0 last:border-0">
+                          <div>
+                            <p className="font-bold text-white">{art.nome_prodotto} - <span className="text-cyan-300">Taglia {art.taglia}</span></p>
+                            <p className="text-xs text-white/60">Atleta: <span className="text-white font-semibold">{art.atleta}</span> {art.nome_personalizzato && ` | Stampa: "${art.nome_personalizzato}"`}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
-
-        {/* --- STORICO ORDINI --- */}
-        <div className="mt-20 border-t border-white/10 pt-10">
-          <h2 className="text-3xl font-bold text-white/90 tracking-wide mb-8">I Miei Ordini Inviati</h2>
-          
-          {ordiniUtente.length === 0 ? (
-            <p className="text-white/50 text-center py-8 italic bg-white/5 border border-white/10 rounded-2xl">
-              Non hai ancora inviato nessun ordine per questa stagione.
-            </p>
-          ) : (
-            <div className="space-y-6">
-              {ordiniUtente.map((ord) => (
-                <div key={ord.id} className="bg-white/5 border border-white/10 rounded-2xl p-6 shadow-md hover:border-white/20 transition-all">
-                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-white/10 pb-4 mb-4 gap-2">
-                    <div>
-                      <span className="text-xs text-white/50 uppercase tracking-widest font-semibold">Identificativo</span>
-                      <h3 className="text-xl font-bold text-blue-200">Ordine #{ord.id}</h3>
-                    </div>
-                    <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end">
-                      <div className="text-right">
-                        <span className="text-xs text-white/50 block">Importo totale</span>
-                        <span className="font-black text-lg">€{ord.totale.toFixed(2)}</span>
-                      </div>
-                      <Badge className={`px-3 py-1 text-xs rounded-full border ${
-                        ord.stato_pagamento === 'In attesa' 
-                          ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' 
-                          : 'bg-green-500/20 text-green-300 border-green-500/30'
-                      }`}>
-                        {ord.stato_pagamento}
-                      </Badge>
-                    </div>
-                  </div>
-
-                  <div className="divide-y divide-white/5 space-y-3">
-                    {ord.articoli.map((art, idx) => (
-                      <div key={idx} className="pt-3 first:pt-0 flex justify-between items-center text-sm">
-                        <div>
-                          <p className="font-bold text-white/90">{art.nome_prodotto} <span className="text-xs text-white/40 font-normal">({art.taglia})</span></p>
-                          <p className="text-xs text-white/60">
-                            Destinatario: <span className="text-white font-semibold">{art.atleta}</span>
-                            {art.nome_personalizzato && (
-                              <span> | Stampa: <span className="text-cyan-400 font-bold">"{art.nome_personalizzato}"</span></span>
-                            )}
-                          </p>
-                        </div>
-                        <span className="font-semibold text-white/80">€{art.prezzo.toFixed(2)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </main>
     </div>
   )
