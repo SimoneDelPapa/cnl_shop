@@ -36,8 +36,6 @@ function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
 
   return (
     <Card className="flex flex-col justify-between overflow-hidden bg-white/5 backdrop-blur-lg border border-white/10 text-white rounded-2xl shadow-[0_8px_32px_0_rgba(0,0,0,0.2)] hover:bg-white/10 transition-all duration-300">
-      
-      {/* SE IL PRODOTTO HA UN'IMMAGINE PNG/JPG CARICATA, LA RENDERING IN CIMA */}
       {prodotto.immagine_url ? (
         <div className="w-full h-48 overflow-hidden border-b border-white/10 bg-slate-950/40 flex items-center justify-center">
           <img 
@@ -133,7 +131,11 @@ export default function App() {
   
   const [adminTab, setAdminTab] = useState('ordini');
   const [nuovoProd, setNuovoProd] = useState({ nome: '', prezzo: '', personalizzabile: false });
-  const [selectedFile, setSelectedFile] = useState(null); // <-- NUOVO STATO PER IL FILE IMMAGINE SELEZIONATO
+  const [selectedFile, setSelectedFile] = useState(null);
+
+  // --- STATI FILTRI ADMIN (NUOVI) ---
+  const [ricercaAdmin, setRicercaAdmin] = useState('');
+  const [filtroStatoAdmin, setFiltroStatoAdmin] = useState('Tutti');
 
   const caricaProdotti = useCallback(async () => {
     try {
@@ -186,12 +188,10 @@ export default function App() {
     initApp();
   }, [caricaProdotti, caricaOrdiniUtente, caricaOrdiniGlobaliAdmin]);
 
-  // INVIA IL NUOVO CAPO CON FORMATO FORMDATA (BINARIO)
   const creaProdottoAdmin = useCallback(async () => {
     if (!nuovoProd.nome.trim() || !nuovoProd.prezzo) return alert("Inserisci nome e prezzo del prodotto");
     const token = localStorage.getItem('token');
     
-    // Costruiamo il form multi-part nativo per includere l'immagine
     const formData = new FormData();
     formData.append('nome', nuovoProd.nome);
     formData.append('prezzo', parseFloat(nuovoProd.prezzo) || 0);
@@ -203,13 +203,12 @@ export default function App() {
     try {
       const res = await fetch('https://cnl-shop-backend.onrender.com/api/admin/products', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }, // NOTA: Niente Content-Type, lo inserisce il browser da solo per FormData!
+        headers: { 'Authorization': `Bearer ${token}` },
         body: formData
       });
       if (res.ok) {
         setNuovoProd({ nome: '', prezzo: '', personalizzabile: false });
         setSelectedFile(null);
-        // Svuotiamo l'input file HTML a schermo
         const fileInput = document.getElementById('file-upload-input');
         if (fileInput) fileInput.value = '';
         await caricaProdotti();
@@ -287,6 +286,34 @@ export default function App() {
     setUtenteLoggato(null); setOrdiniUtente([]); setTuttiGliOrdiniAdmin([]); setViewAdmin(false);
   }, []);
 
+  // --- LOGICA FILTRAGGIO ORDINI ADMIN (DINAMICA E REATTIVA) ---
+  const ordiniAdminFiltrati = useMemo(() => {
+    return tuttiGliOrdiniAdmin.filter(ord => {
+      const matchStato = filtroStatoAdmin === 'Tutti' || ord.stato_pagamento === filtroStatoAdmin;
+      
+      const termine = ricercaAdmin.toLowerCase().trim();
+      const matchAcquirente = ord.acquirente.toLowerCase().includes(termine);
+      const matchEmail = ord.email_acquirente.toLowerCase().includes(termine);
+      const matchId = ord.id.toString() === termine;
+      const matchAtleta = ord.articoli.some(art => art.atleta.toLowerCase().includes(termine));
+
+      return matchStato && (termine === '' || matchAcquirente || matchEmail || matchId || matchAtleta);
+    });
+  }, [tuttiGliOrdiniAdmin, ricercaAdmin, filtroStatoAdmin]);
+
+  // --- STATISTICHE RAPIDE PER L'AMMINISTRATORE ---
+  const statisticheAdmin = useMemo(() => {
+    const stats = { inAttesa: 0, inLavorazione: 0, pronti: 0, completati: 0, incassoTotale: 0 };
+    tuttiGliOrdiniAdmin.forEach(o => {
+      if (o.stato_pagamento === 'In attesa') stats.inAttesa++;
+      if (o.stato_pagamento === 'In lavorazione') stats.inLavorazione++;
+      if (o.stato_pagamento === 'Pronto per il ritiro') stats.pronti++;
+      if (o.stato_pagamento === 'Completato') stats.completati++;
+      stats.incassoTotale += o.totale;
+    });
+    return stats;
+  }, [tuttiGliOrdiniAdmin]);
+
   if (loading && !errore) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center">
@@ -337,6 +364,7 @@ export default function App() {
       
       <main className="max-w-5xl mx-auto">
         {!viewAdmin ? (
+          /* --- VISTA PUBBLICA --- */
           <>
             <h2 className="text-3xl font-bold text-white/90 tracking-wide mb-8 border-b border-white/10 pb-4">Catalogo Abbigliamento</h2>
             {errore ? <div className="bg-red-500/20 p-4 rounded-xl text-red-200">{errore}</div> : (
@@ -411,6 +439,8 @@ export default function App() {
         ) : (
           /* --- VISTA ADMIN (STAFF) --- */
           <div className="space-y-8 animate-fadeIn">
+            
+            {/* Sotto-Navigazione Admin */}
             <div className="flex gap-4 border-b border-white/10 pb-4">
               <button onClick={() => setAdminTab('ordini')} className={`px-5 py-2 rounded-xl font-bold transition-all ${adminTab === 'ordini' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-lg' : 'text-white/50 hover:bg-white/5'}`}>📦 Gestione Ordini</button>
               <button onClick={() => setAdminTab('catalogo')} className={`px-5 py-2 rounded-xl font-bold transition-all ${adminTab === 'catalogo' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-lg' : 'text-white/50 hover:bg-white/5'}`}>👕 Gestione Catalogo Prodotti</button>
@@ -418,13 +448,65 @@ export default function App() {
 
             {adminTab === 'ordini' && (
               <div className="space-y-6">
-                <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-2xl font-black text-white">Ordini Ricevizi</h2>
-                  <button onClick={esportaCsvAdmin} className="bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-200 border border-emerald-500/30 px-5 py-2 rounded-xl text-sm font-bold flex items-center gap-2">📥 Scarica CSV Fornitore</button>
+                
+                {/* BLOCCO DELLE STATISTICHE IN TEMPO REALE */}
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                  <div className="bg-white/5 border border-white/10 p-4 rounded-xl text-center">
+                    <span className="text-xs text-white/40 block font-bold uppercase">In Attesa</span>
+                    <span className="text-2xl font-black text-yellow-400">{statisticheAdmin.inAttesa}</span>
+                  </div>
+                  <div className="bg-white/5 border border-white/10 p-4 rounded-xl text-center">
+                    <span className="text-xs text-white/40 block font-bold uppercase">In Lavoro</span>
+                    <span className="text-2xl font-black text-blue-400">{statisticheAdmin.inLavorazione}</span>
+                  </div>
+                  <div className="bg-white/5 border border-white/10 p-4 rounded-xl text-center">
+                    <span className="text-xs text-white/40 block font-bold uppercase">Pronti</span>
+                    <span className="text-2xl font-black text-orange-400">{statisticheAdmin.pronti}</span>
+                  </div>
+                  <div className="bg-white/5 border border-white/10 p-4 rounded-xl text-center">
+                    <span className="text-xs text-white/40 block font-bold uppercase">Completati</span>
+                    <span className="text-2xl font-black text-green-400">{statisticheAdmin.completati}</span>
+                  </div>
+                  <div className="bg-white/5 border border-cyan-500/20 p-4 rounded-xl text-center col-span-2 md:col-span-1 bg-cyan-500/5">
+                    <span className="text-xs text-cyan-400 block font-bold uppercase">Valore Totale</span>
+                    <span className="text-xl font-black text-white">€{statisticheAdmin.incassoTotale.toFixed(2)}</span>
+                  </div>
                 </div>
-                {tuttiGliOrdiniAdmin.length === 0 ? <p className="text-white/50 text-center py-8 bg-white/5 rounded-2xl">Nessun ordine nel sistema.</p> : (
-                  tuttiGliOrdiniAdmin.map((ord) => (
-                    <div key={`admin-ord-${ord.id}`} className="bg-slate-900/40 border border-cyan-500/20 rounded-3xl p-6 shadow-xl">
+
+                {/* FILTRI DI RICERCA ED ESPORTAZIONE */}
+                <div className="bg-slate-900/60 p-4 rounded-2xl border border-white/10 flex flex-col md:flex-row gap-4 items-center justify-between">
+                  <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto flex-1">
+                    <input 
+                      type="text" 
+                      value={ricercaAdmin} 
+                      onChange={e => setRicercaAdmin(e.target.value)} 
+                      placeholder="Cerca per atleta, acquirente o #ID..." 
+                      className="bg-slate-800 border border-white/20 rounded-xl px-4 py-2 text-sm text-white placeholder-white/30 flex-1 focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                    />
+                    <select 
+                      value={filtroStatoAdmin} 
+                      onChange={e => setFiltroStatoAdmin(e.target.value)}
+                      className="bg-slate-800 border border-white/20 rounded-xl px-3 py-2 text-sm text-white font-semibold cursor-pointer focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                    >
+                      <option value="Tutti">Tutti gli stati</option>
+                      <option value="In attesa">In attesa</option>
+                      <option value="In lavorazione">In lavorazione</option>
+                      <option value="Pronto per il ritiro">Pronto per il ritiro</option>
+                      <option value="Completato">Completato</option>
+                    </select>
+                  </div>
+                  <button onClick={esportaCsvAdmin} className="bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-200 border border-emerald-500/30 px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 w-full md:w-auto justify-center">
+                    📥 Scarica CSV Fornitore
+                  </button>
+                </div>
+
+                {/* ELENCO ORDINI FILTRATI */}
+                <h2 className="text-xl font-bold text-white/70">Risultati della ricerca ({ordiniAdminFiltrati.length})</h2>
+                {ordiniAdminFiltrati.length === 0 ? (
+                  <p className="text-white/50 text-center py-12 bg-white/5 rounded-2xl italic border border-white/5">Nessun ordine corrisponde ai criteri impostati.</p>
+                ) : (
+                  ordiniAdminFiltrati.map((ord) => (
+                    <div key={`admin-ord-${ord.id}`} className="bg-slate-900/40 border border-cyan-500/20 rounded-3xl p-6 shadow-xl animate-fadeIn">
                       <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-white/10 pb-4 mb-4 gap-4">
                         <div>
                           <span className="text-xs text-cyan-400 font-bold tracking-wider uppercase">Registrato</span>
@@ -471,8 +553,6 @@ export default function App() {
                         <label className="text-xs text-white/70 mb-1 block">Nome Prodotto</label>
                         <input type="text" value={nuovoProd.nome} onChange={e => setNuovoProd({...nuovoProd, nome: e.target.value})} className="w-full bg-slate-800 border border-white/20 rounded-xl p-2.5 text-white" placeholder="Es. T-Shirt Rappresentanza"/>
                       </div>
-                      
-                      {/* --- NUOVO INPUT PER FILE PNG/JPG --- */}
                       <div>
                         <label className="text-xs text-cyan-400 font-bold mb-1 block">Immagine Prodotto (PNG / JPG)</label>
                         <input 
@@ -506,7 +586,6 @@ export default function App() {
                       {prodotti.map(p => (
                         <div key={`cat-prod-${p.id}`} className="flex justify-between items-center bg-slate-900/50 p-4 rounded-xl border border-white/5 hover:border-white/10 transition-colors">
                           <div className="flex items-center gap-4">
-                            {/* Anteprima miniatura per l'admin */}
                             {p.immagine_url && (
                               <div className="w-12 h-12 rounded-lg bg-slate-950/40 border border-white/10 overflow-hidden flex items-center justify-center">
                                 <img src={p.immagine_url} alt="" className="w-full h-full object-contain" />
