@@ -4,6 +4,9 @@ import { Button } from "./components/ui/Button";
 import { Badge } from "./components/ui/Badge";
 import Auth from './Auth';
 
+// 🔗 INSERISCI QUI IL LINK PAYPAL REALE DELLA PALLANUOTO LUCCA
+const PAYPAL_LINK_PALLANUOTO = "https://paypal.me/pallanuotolucca?country.x=IT&locale.x=it_IT";
+
 // --- COMPONENTE PRODOTTO ---
 function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
   const [atleta, setAtleta] = useState('');
@@ -133,7 +136,6 @@ export default function App() {
   const [nuovoProd, setNuovoProd] = useState({ nome: '', prezzo: '', personalizzabile: false });
   const [selectedFile, setSelectedFile] = useState(null);
 
-  // --- STATI FILTRI ADMIN (NUOVI) ---
   const [ricercaAdmin, setRicercaAdmin] = useState('');
   const [filtroStatoAdmin, setFiltroStatoAdmin] = useState('Tutti');
 
@@ -261,6 +263,7 @@ export default function App() {
   const rimuoviDalCarrello = useCallback((idUnivoco) => setCarrello(prev => prev.filter(item => item.idUnivoco !== idUnivoco)), []);
   const totaleCarrello = useMemo(() => carrello.reduce((acc, item) => acc + item.prezzo, 0), [carrello]);
 
+  // MODIFICATO: Salva l'ordine nel DB e poi apre il link PayPal della squadra
   const gestisciCheckout = useCallback(async () => {
     setIsCheckout(true);
     try {
@@ -275,10 +278,22 @@ export default function App() {
 
       if (!response.ok) throw new Error("Errore salvataggio");
       const data = await response.json();
-      alert(`✅ Ordine #${data.ordine_id} salvato correttamente!`);
+      
+      // Messaggio di conferma del salvataggio nel database
+      alert(`✅ Ordine #${data.ordine_id} registrato nel sistema!\nAdesso verrai reindirizzato su PayPal per completare il pagamento.`);
+      
+      // Svuota il carrello dell'interfaccia e rinfresca lo storico
       setCarrello([]); 
       await caricaOrdiniUtente(token);
-    } catch (error) { alert("❌ Errore di connessione o sessione scaduta."); } finally { setIsCheckout(false); }
+
+      // Reindirizzamento sicuro al canale PayPal in una nuova scheda
+      window.open(PAYPAL_LINK_PALLANUOTO, '_blank', 'noopener,noreferrer');
+      
+    } catch (error) { 
+      alert("❌ Errore durante il salvataggio dell'ordine o sessione scaduta."); 
+    } finally { 
+      setIsCheckout(false); 
+    }
   }, [carrello, totaleCarrello, caricaOrdiniUtente]);
 
   const gestisciLogout = useCallback(() => {
@@ -286,7 +301,6 @@ export default function App() {
     setUtenteLoggato(null); setOrdiniUtente([]); setTuttiGliOrdiniAdmin([]); setViewAdmin(false);
   }, []);
 
-  // --- LOGICA FILTRAGGIO ORDINI ADMIN (DINAMICA E REATTIVA) ---
   const ordiniAdminFiltrati = useMemo(() => {
     return tuttiGliOrdiniAdmin.filter(ord => {
       const matchStato = filtroStatoAdmin === 'Tutti' || ord.stato_pagamento === filtroStatoAdmin;
@@ -301,7 +315,6 @@ export default function App() {
     });
   }, [tuttiGliOrdiniAdmin, ricercaAdmin, filtroStatoAdmin]);
 
-  // --- STATISTICHE RAPIDE PER L'AMMINISTRATORE ---
   const statisticheAdmin = useMemo(() => {
     const stats = { inAttesa: 0, inLavorazione: 0, pronti: 0, completati: 0, incassoTotale: 0 };
     tuttiGliOrdiniAdmin.forEach(o => {
@@ -364,7 +377,6 @@ export default function App() {
       
       <main className="max-w-5xl mx-auto">
         {!viewAdmin ? (
-          /* --- VISTA PUBBLICA --- */
           <>
             <h2 className="text-3xl font-bold text-white/90 tracking-wide mb-8 border-b border-white/10 pb-4">Catalogo Abbigliamento</h2>
             {errore ? <div className="bg-red-500/20 p-4 rounded-xl text-red-200">{errore}</div> : (
@@ -377,7 +389,7 @@ export default function App() {
               )
             )}
 
-            {!utenteLoggato.is_admin && carrello.length > 0 && (
+            {carrello.length > 0 && (
               <div className="mt-16 bg-white/10 backdrop-blur-xl border border-white/20 rounded-3xl p-8 shadow-2xl">
                 <h2 className="text-2xl font-bold text-white mb-6">Il tuo ordine attuale</h2>
                 <div className="space-y-4 mb-8">
@@ -401,7 +413,7 @@ export default function App() {
                     <p className="text-4xl font-black bg-gradient-to-r from-white to-blue-200 bg-clip-text text-transparent">€{totaleCarrello.toFixed(2)}</p>
                   </div>
                   <Button onClick={gestisciCheckout} disabled={isCheckout} className="w-full md:w-auto px-10 py-6 text-lg font-bold bg-gradient-to-r from-emerald-500 to-green-600 text-white rounded-xl">
-                    {isCheckout ? "Salvataggio..." : "Procedi al Pagamento"}
+                    {isCheckout ? "Salvataggio..." : "Procedi al Pagamento su PayPal"}
                   </Button>
                 </div>
               </div>
@@ -439,8 +451,6 @@ export default function App() {
         ) : (
           /* --- VISTA ADMIN (STAFF) --- */
           <div className="space-y-8 animate-fadeIn">
-            
-            {/* Sotto-Navigazione Admin */}
             <div className="flex gap-4 border-b border-white/10 pb-4">
               <button onClick={() => setAdminTab('ordini')} className={`px-5 py-2 rounded-xl font-bold transition-all ${adminTab === 'ordini' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-lg' : 'text-white/50 hover:bg-white/5'}`}>📦 Gestione Ordini</button>
               <button onClick={() => setAdminTab('catalogo')} className={`px-5 py-2 rounded-xl font-bold transition-all ${adminTab === 'catalogo' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-lg' : 'text-white/50 hover:bg-white/5'}`}>👕 Gestione Catalogo Prodotti</button>
@@ -448,8 +458,6 @@ export default function App() {
 
             {adminTab === 'ordini' && (
               <div className="space-y-6">
-                
-                {/* BLOCCO DELLE STATISTICHE IN TEMPO REALE */}
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                   <div className="bg-white/5 border border-white/10 p-4 rounded-xl text-center">
                     <span className="text-xs text-white/40 block font-bold uppercase">In Attesa</span>
@@ -473,7 +481,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* FILTRI DI RICERCA ED ESPORTAZIONE */}
                 <div className="bg-slate-900/60 p-4 rounded-2xl border border-white/10 flex flex-col md:flex-row gap-4 items-center justify-between">
                   <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto flex-1">
                     <input 
@@ -495,12 +502,9 @@ export default function App() {
                       <option value="Completato">Completato</option>
                     </select>
                   </div>
-                  <button onClick={esportaCsvAdmin} className="bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-200 border border-emerald-500/30 px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 w-full md:w-auto justify-center">
-                    📥 Scarica CSV Fornitore
-                  </button>
+                  <button onClick={esportaCsvAdmin} className="bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-200 border border-emerald-500/30 px-5 py-2.5 rounded-xl text-sm font-bold flex items-center gap-2 w-full md:w-auto justify-center">📥 Scarica CSV Fornitore</button>
                 </div>
 
-                {/* ELENCO ORDINI FILTRATI */}
                 <h2 className="text-xl font-bold text-white/70">Risultati della ricerca ({ordiniAdminFiltrati.length})</h2>
                 {ordiniAdminFiltrati.length === 0 ? (
                   <p className="text-white/50 text-center py-12 bg-white/5 rounded-2xl italic border border-white/5">Nessun ordine corrisponde ai criteri impostati.</p>
@@ -544,7 +548,6 @@ export default function App() {
 
             {adminTab === 'catalogo' && (
               <div className="space-y-8">
-                {/* FORM AGGIUNTA PRODOTTO */}
                 <div className="bg-white/5 p-6 rounded-2xl border border-white/10">
                   <h3 className="text-xl font-bold text-white mb-4">Aggiungi Nuovo Prodotto</h3>
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
@@ -569,7 +572,7 @@ export default function App() {
                       <input type="number" step="0.01" value={nuovoProd.prezzo} onChange={e => setNuovoProd({...nuovoProd, prezzo: e.target.value})} className="w-full bg-slate-800 border border-white/20 rounded-xl p-2.5 text-white" placeholder="0.00"/>
                     </div>
                     <div className="flex items-center gap-3 pb-3">
-                      <input type="checkbox" id="pers" checked={nuovoProd.personalizzabile} onChange={e => setNuovoProd({...nuovoProd, personalizzabile: e.target.checked})} className="w-5 h-5 accent-cyan-500 rounded cursor-pointer"/>
+                      <input type="checkbox" id="pers" checked={nuovoProd.personalizzabile} onChange={e => setUtenteLoggato({...nuovoProd, personalizzabile: e.target.checked})} className="w-5 h-5 accent-cyan-500 rounded cursor-pointer"/>
                       <label htmlFor="pers" className="text-sm font-semibold text-white/90 cursor-pointer">Stampa retro</label>
                     </div>
                   </div>
@@ -578,7 +581,6 @@ export default function App() {
                   </Button>
                 </div>
 
-                {/* LISTA PRODOTTI ESISTENTI */}
                 <div>
                   <h3 className="text-xl font-bold text-white mb-4">Prodotti nel Database ({prodotti.length})</h3>
                   {prodotti.length === 0 ? <p className="text-white/50 text-sm">Nessun prodotto trovato. Inizia ad aggiungerli!</p> : (
@@ -596,9 +598,7 @@ export default function App() {
                               {p.personalizzabile && <span className="text-xs text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full mt-1 inline-block border border-amber-500/20">Personalizzabile</span>}
                             </div>
                           </div>
-                          <button onClick={() => eliminaProdottoAdmin(p.id)} className="bg-red-500/20 text-red-300 border border-red-500/30 hover:bg-red-500/40 px-4 py-2 rounded-lg text-sm font-bold transition-colors">
-                            Elimina
-                          </button>
+                          <button onClick={() => eliminaProdottoAdmin(p.id)} className="bg-red-500/20 text-red-300 border border-red-500/30 hover:bg-red-500/40 px-4 py-2 rounded-lg text-sm font-bold transition-colors">Elimina</button>
                         </div>
                       ))}
                     </div>
