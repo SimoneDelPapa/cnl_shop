@@ -42,7 +42,6 @@ export default function Auth({ onLoginSuccess }) {
 
     try {
       if (view === 'login') {
-        // --- LOGICA DI LOGIN ---
         const res = await fetch('https://cnl-shop-backend.onrender.com/api/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -55,7 +54,6 @@ export default function Auth({ onLoginSuccess }) {
         onLoginSuccess(data.utente);
 
       } else if (view === 'register') {
-        // --- LOGICA DI REGISTRAZIONE ---
         const res = await fetch('https://cnl-shop-backend.onrender.com/api/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -70,7 +68,6 @@ export default function Auth({ onLoginSuccess }) {
         setPassword('');
 
       } else if (view === 'forgot') {
-        // --- LOGICA PASSWORD DIMENTICATA (Richiesta link) ---
         const res = await fetch('https://cnl-shop-backend.onrender.com/api/forgot-password', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -82,7 +79,6 @@ export default function Auth({ onLoginSuccess }) {
         setTimeout(() => setView('login'), 4000);
 
       } else if (view === 'reset') {
-        // --- LOGICA IMPOSTAZIONE NUOVA PASSWORD ---
         if (password.length < 6) throw new Error("La nuova password deve essere di almeno 6 caratteri.");
         
         const res = await fetch('https://cnl-shop-backend.onrender.com/api/reset-password', {
@@ -94,7 +90,7 @@ export default function Auth({ onLoginSuccess }) {
         
         setMessaggio("Password aggiornata con successo! Ora puoi fare il login.");
         setTimeout(() => {
-          window.history.replaceState({}, document.title, "/cnl_shop/"); // Pulisce l'URL
+          window.history.replaceState({}, document.title, "/cnl_shop/"); 
           setView('login');
           setPassword('');
         }, 3000);
@@ -120,7 +116,6 @@ export default function Auth({ onLoginSuccess }) {
         </CardHeader>
 
         <CardContent>
-          {/* MESSAGGI DI ERRORE O SUCCESSO */}
           {errore && (
             <div className="bg-red-500/20 border border-red-500/50 text-red-200 px-4 py-3 rounded-xl text-sm mb-4 text-center animate-fadeIn">
               {errore}

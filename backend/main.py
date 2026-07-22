@@ -204,7 +204,7 @@ def get_current_admin(current_user: Utente = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Accesso negato. Solo Staff.")
     return current_user
 
-# --- ROTTE API UTENTI, RECUPERO PASSWORD & ORDINI ---
+# --- ROTTE API UTENTI E RECUPERO PASSWORD ---
 
 @app.post("/api/register", response_model=UtenteResponse, status_code=status.HTTP_201_CREATED)
 def registra_utente(utente: UtenteCreate, db: Session = Depends(get_db)):
@@ -241,17 +241,34 @@ def ottieni_utente_corrente(current_user: Utente = Depends(get_current_user)):
 def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
     utente = db.query(Utente).filter(Utente.email == req.email).first()
     if not utente:
-        return {"messaggio": "Ok"} # Risposta fittizia di sicurezza
+        return {"messaggio": "Ok"}
 
     expire = datetime.utcnow() + timedelta(minutes=15)
     reset_token = jwt.encode({"sub": str(utente.id), "type": "reset", "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
     
     link_reset = f"https://simonedelpapa.github.io/cnl_shop/?reset={reset_token}"
     
-    print("\n" + "="*40)
-    print(f"🔗 LINK DI RESET PER {utente.email}:")
-    print(link_reset)
-    print("="*40 + "\n")
+    # 🔗 SOSTITUISCI CON LE CREDENZIALI GOOGLE REALI
+    mittente = "cnl.pallanuotolucca@gmail.com"  
+    password_app = "dymn bhad wwdw hjwp"       
+    
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = f"CNL Shop <{mittente}>"
+        msg['To'] = utente.email
+        msg['Subject'] = "Reset Password - CNL Shop"
+        
+        corpo = f"Ciao {utente.nome},\n\nHai richiesto il reset della password per il tuo account CNL Shop.\nClicca sul link sottostante per creare una nuova password (il link scadrà tra 15 minuti):\n\n{link_reset}\n\nSe non hai richiesto tu il reset, ignora questa email."
+        msg.attach(MIMEText(corpo, 'plain'))
+        
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(mittente, password_app)
+        server.send_message(msg)
+        server.quit()
+        print(f"✅ Email inviata con successo a {utente.email}")
+    except Exception as e:
+        print("❌ Errore durante l'invio della mail:", e)
 
     return {"messaggio": "Ok"}
 
@@ -275,6 +292,8 @@ def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
     db.commit()
 
     return {"messaggio": "Password modificata con successo"}
+
+# --- ROTTE API ORDINI E PRODOTTI ---
 
 @app.get("/api/products", response_model=List[ProdottoResponse])
 def get_products(db: Session = Depends(get_db)):
