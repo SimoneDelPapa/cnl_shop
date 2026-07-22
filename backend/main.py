@@ -14,6 +14,7 @@ from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 import jwt
 import bcrypt
+import httpx  # <--- SOSTITUITO requests CON httpx (già presente su Render)
 
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session, joinedload
@@ -201,9 +202,7 @@ def get_current_admin(current_user: Utente = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Accesso negato. Solo Staff.")
     return current_user
 
-# --- LOGICA INVIO EMAIL CON RESEND (BACKGROUND) ---
-import requests
-
+# --- LOGICA INVIO EMAIL CON BREVO (BACKGROUND) ---
 def invia_email_reset(nome: str, destinatario: str, link_reset: str):
     api_key = os.getenv("BREVO_API_KEY")
     if not api_key:
@@ -240,7 +239,8 @@ def invia_email_reset(nome: str, destinatario: str, link_reset: str):
     }
 
     try:
-        response = requests.post(url, json=payload, headers=headers)
+        # <--- Modificato qui per usare httpx invece di requests
+        response = httpx.post(url, json=payload, headers=headers, timeout=10.0)
         if response.status_code in [200, 201, 202]:
             print(f"✅ EMAIL INVIATA CON SUCCESSO A {destinatario}")
         else:
@@ -291,7 +291,7 @@ def forgot_password(req: ForgotPasswordRequest, background_tasks: BackgroundTask
     reset_token = jwt.encode({"sub": str(utente.id), "type": "reset", "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
     link_reset = f"https://simonedelpapa.github.io/cnl_shop/?reset={reset_token}"
     
-    # Invia la mail in background con Resend
+    # Invia la mail in background
     background_tasks.add_task(invia_email_reset, utente.nome, utente.email, link_reset)
 
     return {"messaggio": "Ok"}
