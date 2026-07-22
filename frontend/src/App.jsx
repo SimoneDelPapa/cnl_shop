@@ -296,17 +296,42 @@ export default function App() {
     setUtenteLoggato(null); setOrdiniUtente([]); setTuttiGliOrdiniAdmin([]); setViewAdmin(false);
   }, []);
 
-  const ordiniAdminFiltrati = useMemo(() => {
-    return tuttiGliOrdiniAdmin.filter(ord => {
+  // --- RAGGRUPPAMENTO ORDINI PER UTENTE (ADMIN) ---
+  const ordiniAdminRaggruppatiPerUtente = useMemo(() => {
+    const gruppiMap = new Map();
+
+    tuttiGliOrdiniAdmin.forEach(ord => {
       const matchStato = filtroStatoAdmin === 'Tutti' || ord.stato_pagamento === filtroStatoAdmin;
-      
       const termine = ricercaAdmin.toLowerCase().trim();
+      
       const matchAcquirente = ord.acquirente.toLowerCase().includes(termine);
       const matchEmail = ord.email_acquirente.toLowerCase().includes(termine);
       const matchId = ord.id.toString() === termine;
       const matchAtleta = ord.articoli.some(art => art.atleta.toLowerCase().includes(termine));
 
-      return matchStato && (termine === '' || matchAcquirente || matchEmail || matchId || matchAtleta);
+      if (matchStato && (termine === '' || matchAcquirente || matchEmail || matchId || matchAtleta)) {
+        const chiaveUtente = ord.email_acquirente || "Sconosciuta";
+        
+        if (!gruppiMap.has(chiaveUtente)) {
+          gruppiMap.set(chiaveUtente, {
+            acquirente: ord.acquirente,
+            email: chiaveUtente,
+            ordini: [],
+            totaleSpeso: 0
+          });
+        }
+        
+        const gruppo = gruppiMap.get(chiaveUtente);
+        gruppo.ordini.push(ord);
+        gruppo.totaleSpeso += ord.totale;
+      }
+    });
+
+    // Convertiamo in Array e ordiniamo cronologicamente (i gruppi con gli ordini più recenti in cima)
+    return Array.from(gruppiMap.values()).sort((a, b) => {
+      const maxIdA = Math.max(...a.ordini.map(o => o.id));
+      const maxIdB = Math.max(...b.ordini.map(o => o.id));
+      return maxIdB - maxIdA;
     });
   }, [tuttiGliOrdiniAdmin, ricercaAdmin, filtroStatoAdmin]);
 
@@ -454,7 +479,7 @@ export default function App() {
             </div>
 
             {adminTab === 'ordini' && (
-              <div className="space-y-4 sm:space-y-6">
+              <div className="space-y-6">
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-4">
                   <div className="bg-white/5 border border-white/10 p-2.5 sm:p-4 rounded-xl text-center">
                     <span className="text-[10px] sm:text-xs text-white/40 block font-bold uppercase">In Attesa</span>
@@ -502,41 +527,69 @@ export default function App() {
                   <button onClick={esportaCsvAdmin} className="bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-200 border border-emerald-500/30 px-4 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2 justify-center">📥 Scarica CSV</button>
                 </div>
 
-                <h2 className="text-sm sm:text-xl font-bold text-white/70">Risultati ({ordiniAdminFiltrati.length})</h2>
-                {ordiniAdminFiltrati.length === 0 ? (
+                <h2 className="text-sm sm:text-xl font-bold text-white/70">Account trovati ({ordiniAdminRaggruppatiPerUtente.length})</h2>
+                {ordiniAdminRaggruppatiPerUtente.length === 0 ? (
                   <p className="text-white/50 text-center py-8 bg-white/5 rounded-2xl italic border border-white/5 text-xs sm:text-sm">Nessun ordine trovato.</p>
                 ) : (
-                  ordiniAdminFiltrati.map((ord) => (
-                    <div key={`admin-ord-${ord.id}`} className="bg-slate-900/40 border border-cyan-500/20 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-xl animate-fadeIn">
-                      <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-white/10 pb-3 mb-3 gap-3">
+                  /* --- CICLO SUI GRUPPI UTENTE --- */
+                  ordiniAdminRaggruppatiPerUtente.map((gruppo) => (
+                    <div key={`gruppo-user-${gruppo.email}`} className="bg-slate-900/60 border border-white/15 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-2xl space-y-4">
+                      
+                      {/* INTESTAZIONE UTENTE */}
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-white/10 pb-3 gap-2">
                         <div>
-                          <span className="text-[10px] sm:text-xs text-cyan-400 font-bold tracking-wider uppercase">Registrato</span>
-                          <h3 className="text-lg sm:text-2xl font-black text-white">Ordine #{ord.id}</h3>
-                          <p className="text-xs text-white/60 mt-0.5">Acquirente: <span className="text-white font-semibold">{ord.acquirente}</span> ({ord.email_acquirente})</p>
+                          <span className="text-[10px] sm:text-xs text-cyan-400 font-bold uppercase tracking-wider">Account Cliente</span>
+                          <h3 className="text-lg sm:text-2xl font-black text-white">{gruppo.acquirente}</h3>
+                          <p className="text-xs text-white/60">{gruppo.email}</p>
                         </div>
-                        <div className="flex items-center gap-3 w-full md:w-auto justify-between sm:justify-end border-t md:border-t-0 pt-2 md:pt-0 border-white/5">
-                          <div className="text-left md:text-right">
-                            <span className="text-[10px] text-white/40 block">Totale</span>
-                            <span className="font-black text-base sm:text-xl text-cyan-300">€{ord.totale.toFixed(2)}</span>
-                          </div>
-                          <select value={ord.stato_pagamento} onChange={(e) => cambiaStatoOrdineAdmin(ord.id, e.target.value)} className="bg-slate-800 border border-white/20 rounded-xl p-2 text-xs sm:text-sm text-white font-bold focus:outline-none focus:ring-2 focus:ring-cyan-400">
-                            <option value="In attesa">In attesa</option>
-                            <option value="In lavorazione">In lavorazione</option>
-                            <option value="Pronto per il ritiro">Pronto per il ritiro</option>
-                            <option value="Completato">Completato</option>
-                          </select>
-                        </div>
+                        <Badge className="bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 px-3 py-1 rounded-full text-xs font-semibold">
+                          {gruppo.ordini.length} {gruppo.ordini.length === 1 ? 'ordine' : 'ordini'}
+                        </Badge>
                       </div>
-                      <div className="space-y-2 bg-white/5 p-3 rounded-xl border border-white/5">
-                        {ord.articoli.map((art, idx) => (
-                          <div key={`admin-art-${idx}`} className="flex justify-between items-center text-xs sm:text-sm border-b border-white/5 pb-1.5 last:pb-0 last:border-0">
-                            <div>
-                              <p className="font-bold text-white">{art.nome_prodotto} - <span className="text-cyan-300">Taglia {art.taglia}</span></p>
-                              <p className="text-[11px] text-white/60">Atleta: <span className="text-white font-semibold">{art.atleta}</span> {art.nome_personalizzato && ` | Stampa: "${art.nome_personalizzato}"`}</p>
+
+                      {/* LISTA DEGLI ORDINI CRONOLOGICI DELL'UTENTE */}
+                      <div className="space-y-3">
+                        {gruppo.ordini.map((ord) => (
+                          <div key={`admin-ord-${ord.id}`} className="bg-white/5 border border-white/10 rounded-xl sm:rounded-2xl p-3 sm:p-4">
+                            <div className="flex flex-col md:flex-row justify-between items-start md:items-center border-b border-white/5 pb-2.5 mb-2.5 gap-2">
+                              <div>
+                                <h4 className="text-sm sm:text-lg font-bold text-blue-200">Ordine #{ord.id}</h4>
+                              </div>
+                              <div className="flex items-center gap-3 w-full md:w-auto justify-between sm:justify-end">
+                                <span className="font-black text-sm sm:text-base text-cyan-300">€{ord.totale.toFixed(2)}</span>
+                                <select 
+                                  value={ord.stato_pagamento} 
+                                  onChange={(e) => cambiaStatoOrdineAdmin(ord.id, e.target.value)} 
+                                  className="bg-slate-800 border border-white/20 rounded-lg px-2 py-1 text-xs text-white font-bold focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                                >
+                                  <option value="In attesa">In attesa</option>
+                                  <option value="In lavorazione">In lavorazione</option>
+                                  <option value="Pronto per il ritiro">Pronto per il ritiro</option>
+                                  <option value="Completato">Completato</option>
+                                </select>
+                              </div>
+                            </div>
+                            <div className="space-y-1.5">
+                              {ord.articoli.map((art, idx) => (
+                                <div key={`admin-art-${idx}`} className="flex justify-between items-center text-xs text-white/80">
+                                  <div>
+                                    <span className="font-bold text-white">{art.nome_prodotto}</span> <span className="text-white/50">({art.taglia})</span>
+                                    <span className="text-white/60 ml-2">Destinatario: <strong className="text-white">{art.atleta}</strong> {art.nome_personalizzato && ` | Stampa: "${art.nome_personalizzato}"`}</span>
+                                  </div>
+                                  <span className="font-semibold">€{art.prezzo.toFixed(2)}</span>
+                                </div>
+                              ))}
                             </div>
                           </div>
                         ))}
                       </div>
+
+                      {/* RIEPILOGO TOTALE UTENTE */}
+                      <div className="bg-cyan-950/40 border border-cyan-500/30 rounded-xl p-3.5 flex justify-between items-center mt-2">
+                        <span className="text-xs sm:text-sm font-bold text-cyan-200 uppercase tracking-wider">Totale dovuti/pagati da questo account:</span>
+                        <span className="text-base sm:text-2xl font-black text-emerald-400">€{gruppo.totaleSpeso.toFixed(2)}</span>
+                      </div>
+
                     </div>
                   ))
                 )}
