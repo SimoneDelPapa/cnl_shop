@@ -1,25 +1,34 @@
 import os
 import io
 import csv
-import shutil
 from datetime import datetime, timedelta
 from fastapi import FastAPI, Depends, HTTPException, status, File, UploadFile, Form, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
-from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 import jwt
 import bcrypt
-import httpx  # <--- SOSTITUITO requests CON httpx (già presente su Render)
+import httpx
+
+import cloudinary
+import cloudinary.uploader
 
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session, joinedload
 
 load_dotenv()
+
+# --- CONFIGURAZIONE CLOUDINARY ---
+cloudinary.config( 
+  cloud_name = os.getenv("CLOUDINARY_CLOUD_NAME"), 
+  api_key = os.getenv("CLOUDINARY_API_KEY"), 
+  api_secret = os.getenv("CLOUDINARY_API_SECRET"),
+  secure = True
+)
 
 SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -152,7 +161,6 @@ class ResetPasswordRequest(BaseModel):
     token: str
     nuova_password: str
 
-
 # --- INIZIALIZZAZIONE FASTAPI ---
 app = FastAPI(title="CNL Shop API")
 
@@ -163,12 +171,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-UPLOAD_DIR = "uploads"
-if not os.path.exists(UPLOAD_DIR):
-    os.makedirs(UPLOAD_DIR)
-
-app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
 def get_db():
     db = SessionLocal()
@@ -202,7 +204,7 @@ def get_current_admin(current_user: Utente = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Accesso negato. Solo Staff.")
     return current_user
 
-# --- LOGICA INVIO EMAIL CON BREVO (BACKGROUND) ---
+# --- LOGICA INVIO EMAIL (BACKGROUND) ---
 def invia_email_reset(nome: str, destinatario: str, link_reset: str):
     api_key = os.getenv("BREVO_API_KEY")
     if not api_key:
@@ -210,43 +212,31 @@ def invia_email_reset(nome: str, destinatario: str, link_reset: str):
         return
 
     url = "https://api.brevo.com/v3/smtp/email"
-    
     headers = {
         "accept": "application/json",
         "content-type": "application/json",
         "api-key": api_key
     }
-    
     payload = {
-        "sender": {
-            "name": "CNL Shop",
-            "email": "cnl.pallanuotolucca@gmail.com"
-        },
-        "to": [
-            {
-                "email": destinatario,
-                "name": nome
-            }
-        ],
+        "sender": {"name": "CNL Shop", "email": "cnl.pallanuotolucca@gmail.com"},
+        "to": [{"email": destinatario, "name": nome}],
         "subject": "Reset Password - CNL Shop",
         "htmlContent": f"""
             <p>Ciao <strong>{nome}</strong>,</p>
             <p>Hai richiesto il reset della password per il tuo account CNL Shop.</p>
             <p>Clicca sul pulsante qui sotto per impostare la nuova password (scade tra 15 minuti):</p>
             <p><a href="{link_reset}" style="background-color: #0891b2; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">Reimposta Password</a></p>
-            <p>Se non hai richiesto tu il reset, ignora questa email.</p>
         """
     }
 
     try:
-        # <--- Modificato qui per usare httpx invece di requests
         response = httpx.post(url, json=payload, headers=headers, timeout=10.0)
         if response.status_code in [200, 201, 202]:
-            print(f"✅ EMAIL INVIATA CON SUCCESSO A {destinatario}")
+            print(f"✅ EMAIL INVIATA A {destinatario}")
         else:
             print(f"❌ ERRORE BREVO ({response.status_code}): {response.text}")
     except Exception as e:
-        print(f"❌ ERRORE CHIAMATA BREVO A {destinatario}: {e}")
+        print(f"❌ ERRORE INVIO MAIL: {e}")
 
 # --- ROTTE API UTENTI E RECUPERO PASSWORD ---
 
@@ -291,7 +281,6 @@ def forgot_password(req: ForgotPasswordRequest, background_tasks: BackgroundTask
     reset_token = jwt.encode({"sub": str(utente.id), "type": "reset", "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
     link_reset = f"https://simonedelpapa.github.io/cnl_shop/?reset={reset_token}"
     
-    # Invia la mail in background
     background_tasks.add_task(invia_email_reset, utente.nome, utente.email, link_reset)
 
     return {"messaggio": "Ok"}
@@ -412,14 +401,9 @@ def admin_crea_prodotto(
 ):
     saved_file_url = None
     if file:
-        timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-        filename = f"{timestamp}_{file.filename.replace(' ', '_')}"
-        file_path = os.path.join(UPLOAD_DIR, filename)
-        
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
-        saved_file_url = f"https://cnl-shop-backend.onrender.com/uploads/{filename}"
+        # Upload diretto dello stream del file su Cloudinary
+        upload_result = cloudinary.uploader.upload(file.file, folder="cnl_shop")
+        saved_file_url = upload_result.get("secure_url")
 
     nuovo_prodotto = Prodotto(nome=nome, prezzo=prezzo, personalizzabile=personalizzabile, immagine_url=saved_file_url)
     db.add(nuovo_prodotto)
@@ -432,12 +416,6 @@ def admin_elimina_prodotto(prodotto_id: int, db: Session = Depends(get_db), admi
     prodotto = db.query(Prodotto).filter(Prodotto.id == prodotto_id).first()
     if not prodotto:
         raise HTTPException(status_code=404, detail="Prodotto non trovato")
-    
-    if prodotto.immagine_url:
-        filename = prodotto.immagine_url.split("/")[-1]
-        local_path = os.path.join(UPLOAD_DIR, filename)
-        if os.path.exists(local_path):
-            os.remove(local_path)
 
     db.delete(prodotto)
     db.commit()
