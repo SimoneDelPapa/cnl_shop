@@ -3,7 +3,7 @@ import io
 import csv
 import shutil
 from datetime import datetime, timedelta
-from fastapi import FastAPI, Depends, HTTPException, status, File, UploadFile, Form
+from fastapi import FastAPI, Depends, HTTPException, status, File, UploadFile, Form, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
@@ -204,6 +204,30 @@ def get_current_admin(current_user: Utente = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Accesso negato. Solo Staff.")
     return current_user
 
+# --- LOGICA INVIO EMAIL (BACKGROUND) ---
+def invia_email_reset(nome: str, destinatario: str, link_reset: str):
+    mittente = "cnl.pallanuotolucca@gmail.com"  
+    password_app = "dymnbhadwwdwhjwp" # Spazi rimossi per evitare errori SMTP       
+    
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = f"CNL Shop <{mittente}>"
+        msg['To'] = destinatario
+        msg['Subject'] = "Reset Password - CNL Shop"
+        
+        corpo = f"Ciao {nome},\n\nHai richiesto il reset della password per il tuo account CNL Shop.\nClicca sul link sottostante per creare una nuova password (il link scadrà tra 15 minuti):\n\n{link_reset}\n\nSe non hai richiesto tu il reset, ignora questa email."
+        msg.attach(MIMEText(corpo, 'plain'))
+        
+        # Uso di SMTP_SSL sulla porta 465 (diretta, più sicura e che non va in timeout)
+        with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10) as server:
+            server.login(mittente, password_app)
+            server.send_message(msg)
+            
+        print(f"✅ Email inviata con successo a {destinatario}")
+    except Exception as e:
+        print(f"❌ Errore durante l'invio della mail a {destinatario}: {e}")
+
+
 # --- ROTTE API UTENTI E RECUPERO PASSWORD ---
 
 @app.post("/api/register", response_model=UtenteResponse, status_code=status.HTTP_201_CREATED)
@@ -238,37 +262,17 @@ def ottieni_utente_corrente(current_user: Utente = Depends(get_current_user)):
     return current_user
 
 @app.post("/api/forgot-password")
-def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+def forgot_password(req: ForgotPasswordRequest, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     utente = db.query(Utente).filter(Utente.email == req.email).first()
     if not utente:
         return {"messaggio": "Ok"}
 
     expire = datetime.utcnow() + timedelta(minutes=15)
     reset_token = jwt.encode({"sub": str(utente.id), "type": "reset", "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
-    
     link_reset = f"https://simonedelpapa.github.io/cnl_shop/?reset={reset_token}"
     
-    # 🔗 SOSTITUISCI CON LE CREDENZIALI GOOGLE REALI
-    mittente = "cnl.pallanuotolucca@gmail.com"  
-    password_app = "dymn bhad wwdw hjwp"       
-    
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = f"CNL Shop <{mittente}>"
-        msg['To'] = utente.email
-        msg['Subject'] = "Reset Password - CNL Shop"
-        
-        corpo = f"Ciao {utente.nome},\n\nHai richiesto il reset della password per il tuo account CNL Shop.\nClicca sul link sottostante per creare una nuova password (il link scadrà tra 15 minuti):\n\n{link_reset}\n\nSe non hai richiesto tu il reset, ignora questa email."
-        msg.attach(MIMEText(corpo, 'plain'))
-        
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(mittente, password_app)
-        server.send_message(msg)
-        server.quit()
-        print(f"✅ Email inviata con successo a {utente.email}")
-    except Exception as e:
-        print("❌ Errore durante l'invio della mail:", e)
+    # Invia la mail in background in modo da rispondere istantaneamente al frontend
+    background_tasks.add_task(invia_email_reset, utente.nome, utente.email, link_reset)
 
     return {"messaggio": "Ok"}
 
