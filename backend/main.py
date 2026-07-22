@@ -13,8 +13,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 import jwt
-import bcrypt  
-import resend  # <-- Nuova libreria per l'invio mail
+import bcrypt
 
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session, joinedload
