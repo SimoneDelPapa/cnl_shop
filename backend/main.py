@@ -60,8 +60,8 @@ def create_access_token(data: dict):
     return encoded_jwt
 
 # --- CONFIGURAZIONE RESEND (EMAIL API) ---
-# ⚠️ INSERISCI QUI LA TUA CHIAVE API DI RESEND (Inizia con re_...)
-resend.api_key = "re_DuST1yY8_5KepKdatKCeHMcsDTJqqLmpd"
+# Legge la chiave in modo sicuro dalle variabili d'ambiente di Render
+resend.api_key = os.getenv("RESEND_API_KEY")
 
 # --- MODELLI DATABASE ---
 class Utente(Base):
