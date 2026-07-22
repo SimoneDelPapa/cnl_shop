@@ -74,7 +74,7 @@ class Utente(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     nome = Column(String, nullable=False)
-    cognome = Column(String, nullable=False, default="") # Nuova colonna
+    cognome = Column(String, nullable=False, default="")
     hashed_password = Column(String, nullable=False)
     is_attivo = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False) 
@@ -84,7 +84,10 @@ class Prodotto(Base):
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String, nullable=False)
     prezzo = Column(Float, nullable=False)
-    personalizzabile = Column(Boolean, default=False)
+    # Flag personalizzazione individuali
+    personalizzabile_nome = Column(Boolean, default=False)
+    personalizzabile_numero = Column(Boolean, default=False)
+    personalizzabile_colore = Column(Boolean, default=False)
     immagine_url = Column(String, nullable=True) 
 
 class Ordine(Base):
@@ -108,8 +111,8 @@ class ArticoloOrdine(Base):
     atleta = Column(String, nullable=False)
     taglia = Column(String, nullable=False)
     nome_personalizzato = Column(String, nullable=True)
-    colore_personalizzato = Column(String, nullable=True) # Nuova colonna
-    numero_personalizzato = Column(String, nullable=True) # Nuova colonna
+    colore_personalizzato = Column(String, nullable=True)
+    numero_personalizzato = Column(String, nullable=True)
 
     ordine = relationship("Ordine", back_populates="articoli")
 
@@ -140,7 +143,9 @@ class ProdottoResponse(BaseModel):
     id: int
     nome: str
     prezzo: float
-    personalizzabile: bool
+    personalizzabile_nome: bool
+    personalizzabile_numero: bool
+    personalizzabile_colore: bool
     immagine_url: Optional[str] = None
     class Config:
         from_attributes = True
@@ -175,7 +180,11 @@ app = FastAPI(title="CNL Shop API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "https://simonedelpapa.github.io"],
+    allow_origins=[
+        "https://simonedelpapa.github.io",
+        "http://localhost:5173",
+        "http://localhost:3000"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -446,7 +455,9 @@ def admin_esporta_csv(db: Session = Depends(get_db), admin_user: Utente = Depend
 def admin_crea_prodotto(
     nome: str = Form(...),
     prezzo: float = Form(...),
-    personalizzabile: bool = Form(...),
+    personalizzabile_nome: bool = Form(False),
+    personalizzabile_numero: bool = Form(False),
+    personalizzabile_colore: bool = Form(False),
     file: Optional[UploadFile] = File(None),
     db: Session = Depends(get_db),
     admin_user: Utente = Depends(get_current_admin)
@@ -456,7 +467,14 @@ def admin_crea_prodotto(
         upload_result = cloudinary.uploader.upload(file.file, folder="cnl_shop")
         saved_file_url = upload_result.get("secure_url")
 
-    nuovo_prodotto = Prodotto(nome=nome, prezzo=prezzo, personalizzabile=personalizzabile, immagine_url=saved_file_url)
+    nuovo_prodotto = Prodotto(
+        nome=nome, 
+        prezzo=prezzo, 
+        personalizzabile_nome=personalizzabile_nome,
+        personalizzabile_numero=personalizzabile_numero,
+        personalizzabile_colore=personalizzabile_colore,
+        immagine_url=saved_file_url
+    )
     db.add(nuovo_prodotto)
     db.commit()
     db.refresh(nuovo_prodotto)

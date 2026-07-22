@@ -14,6 +14,8 @@ function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
   const [colorePers, setColorePers] = useState('NERA');
   const [numeroPers, setNumeroPers] = useState('');
 
+  const haPersonalizzazioni = prodotto.personalizzabile_nome || prodotto.personalizzabile_numero || prodotto.personalizzabile_colore;
+
   const handleAdd = () => {
     if (!atleta.trim()) {
       alert("Attenzione: Inserisci il nome dell'atleta a cui è destinato il capo.");
@@ -31,9 +33,9 @@ function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
       prezzo: prodotto.prezzo,
       atleta: atleta.trim(),
       taglia: taglia,
-      nomePersonalizzato: prodotto.personalizzabile ? nomePers.trim() : null,
-      colorePersonalizzato: prodotto.personalizzabile ? colorePers : null,
-      numeroPersonalizzato: prodotto.personalizzabile ? numeroPers.trim() : null
+      nomePersonalizzato: prodotto.personalizzabile_nome ? nomePers.trim() : null,
+      colorePersonalizzato: prodotto.personalizzabile_colore ? colorePers : null,
+      numeroPersonalizzato: prodotto.personalizzabile_numero ? numeroPers.trim() : null
     });
     
     setAtleta('');
@@ -64,7 +66,7 @@ function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
           €{prodotto.prezzo.toFixed(2)}
         </span>
         
-        {prodotto.personalizzabile ? (
+        {haPersonalizzazioni ? (
           <Badge variant="secondary" className="bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 backdrop-blur-sm px-3 py-0.5 font-semibold rounded-full mb-3 text-xs">
             Personalizzabile
           </Badge>
@@ -94,34 +96,41 @@ function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
               </select>
             </div>
 
-            {prodotto.personalizzabile && (
+            {haPersonalizzazioni && (
               <div className="space-y-2 border-t border-white/10 pt-2">
-                <div>
-                  <label className="text-xs text-white/70 font-semibold mb-1 block">Colore Capo</label>
-                  <select 
-                    value={colorePers} onChange={e => setColorePers(e.target.value)}
-                    className="w-full bg-white/5 border border-white/20 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-400 [&>option]:text-slate-900 appearance-none font-bold"
-                  >
-                    <option value="NERA">NERA</option>
-                    <option value="BIANCA">BIANCA</option>
-                    <option value="ROSSA">ROSSA</option>
-                  </select>
-                </div>
+                {prodotto.personalizzabile_colore && (
+                  <div>
+                    <label className="text-xs text-white/70 font-semibold mb-1 block">Colore Capo</label>
+                    <select 
+                      value={colorePers} onChange={e => setColorePers(e.target.value)}
+                      className="w-full bg-white/5 border border-white/20 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-400 [&>option]:text-slate-900 appearance-none font-bold"
+                    >
+                      <option value="NERA">NERA</option>
+                      <option value="BIANCA">BIANCA</option>
+                      <option value="ROSSA">ROSSA</option>
+                    </select>
+                  </div>
+                )}
+                
                 <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="text-xs text-white/70 font-semibold mb-1 block">Nome Stampa</label>
-                    <input 
-                      type="text" value={nomePers} onChange={e => setNomePers(e.target.value.toUpperCase())} placeholder="Es. GIULIA"
-                      className="w-full bg-white/5 border border-white/20 rounded-lg p-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-400 font-bold"
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs text-white/70 font-semibold mb-1 block">Numero Stampa</label>
-                    <input 
-                      type="text" value={numeroPers} onChange={e => setNumeroPers(e.target.value)} placeholder="Es. 10"
-                      className="w-full bg-white/5 border border-white/20 rounded-lg p-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-400 font-bold"
-                    />
-                  </div>
+                  {prodotto.personalizzabile_nome && (
+                    <div className={!prodotto.personalizzabile_numero ? "col-span-2" : ""}>
+                      <label className="text-xs text-white/70 font-semibold mb-1 block">Nome Stampa</label>
+                      <input 
+                        type="text" value={nomePers} onChange={e => setNomePers(e.target.value.toUpperCase())} placeholder="Es. GIULIA"
+                        className="w-full bg-white/5 border border-white/20 rounded-lg p-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-400 font-bold"
+                      />
+                    </div>
+                  )}
+                  {prodotto.personalizzabile_numero && (
+                    <div className={!prodotto.personalizzabile_nome ? "col-span-2" : ""}>
+                      <label className="text-xs text-white/70 font-semibold mb-1 block">Numero Stampa</label>
+                      <input 
+                        type="text" value={numeroPers} onChange={e => setNumeroPers(e.target.value)} placeholder="Es. 10"
+                        className="w-full bg-white/5 border border-white/20 rounded-lg p-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-400 font-bold"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -160,7 +169,13 @@ export default function App() {
   const [viewAdmin, setViewAdmin] = useState(false);
   
   const [adminTab, setAdminTab] = useState('ordini');
-  const [nuovoProd, setNuovoProd] = useState({ nome: '', prezzo: '', personalizzabile: false });
+  const [nuovoProd, setNuovoProd] = useState({ 
+    nome: '', 
+    prezzo: '', 
+    personalizzabile_nome: false,
+    personalizzabile_numero: false,
+    personalizzabile_colore: false
+  });
   const [selectedFile, setSelectedFile] = useState(null);
 
   const [ricercaAdmin, setRicercaAdmin] = useState('');
@@ -195,7 +210,7 @@ export default function App() {
 
   useEffect(() => {
     const initApp = async () => {
-      const token = localStorage.getItem('token');
+      const token = sessionStorage.getItem('token');
       if (token) {
         try {
           const res = await fetch('https://cnl-shop-backend.onrender.com/api/users/me', { headers: { 'Authorization': `Bearer ${token}` } });
@@ -210,7 +225,7 @@ export default function App() {
           } else {
             await caricaOrdiniUtente(token);
           }
-        } catch (error) { localStorage.removeItem('token'); }
+        } catch (error) { sessionStorage.removeItem('token'); }
       }
       await caricaProdotti();
     };
@@ -219,12 +234,15 @@ export default function App() {
 
   const creaProdottoAdmin = useCallback(async () => {
     if (!nuovoProd.nome.trim() || !nuovoProd.prezzo) return alert("Inserisci nome e prezzo del prodotto");
-    const token = localStorage.getItem('token');
+    const token = sessionStorage.getItem('token');
     
     const formData = new FormData();
     formData.append('nome', nuovoProd.nome);
     formData.append('prezzo', parseFloat(nuovoProd.prezzo) || 0);
-    formData.append('personalizzabile', nuovoProd.personalizzabile);
+    formData.append('personalizzabile_nome', nuovoProd.personalizzabile_nome);
+    formData.append('personalizzabile_numero', nuovoProd.personalizzabile_numero);
+    formData.append('personalizzabile_colore', nuovoProd.personalizzabile_colore);
+
     if (selectedFile) {
       formData.append('file', selectedFile);
     }
@@ -236,7 +254,13 @@ export default function App() {
         body: formData
       });
       if (res.ok) {
-        setNuovoProd({ nome: '', prezzo: '', personalizzabile: false });
+        setNuovoProd({ 
+          nome: '', 
+          prezzo: '', 
+          personalizzabile_nome: false,
+          personalizzabile_numero: false,
+          personalizzabile_colore: false
+        });
         setSelectedFile(null);
         const fileInput = document.getElementById('file-upload-input');
         if (fileInput) fileInput.value = '';
@@ -247,7 +271,7 @@ export default function App() {
 
   const eliminaProdottoAdmin = useCallback(async (id) => {
     if (!window.confirm("Sei sicuro di voler eliminare questo prodotto dal catalogo?")) return;
-    const token = localStorage.getItem('token');
+    const token = sessionStorage.getItem('token');
     try {
       const res = await fetch(`https://cnl-shop-backend.onrender.com/api/admin/products/${id}`, {
         method: 'DELETE',
@@ -258,7 +282,7 @@ export default function App() {
   }, [caricaProdotti]);
 
   const aggiornaOrdineAdmin = useCallback(async (ordineId, datiAggiornati) => {
-    const token = localStorage.getItem('token');
+    const token = sessionStorage.getItem('token');
     try {
       const response = await fetch(`https://cnl-shop-backend.onrender.com/api/admin/orders/${ordineId}`, {
         method: 'PATCH',
@@ -270,7 +294,7 @@ export default function App() {
   }, [caricaOrdiniGlobaliAdmin]);
 
   const esportaCsvAdmin = useCallback(async () => {
-    const token = localStorage.getItem('token');
+    const token = sessionStorage.getItem('token');
     try {
       const response = await fetch('https://cnl-shop-backend.onrender.com/api/admin/export-csv', { headers: { 'Authorization': `Bearer ${token}` } });
       if (!response.ok) throw new Error();
@@ -293,7 +317,7 @@ export default function App() {
   const gestisciCheckout = useCallback(async () => {
     setIsCheckout(true);
     try {
-      const token = localStorage.getItem('token'); 
+      const token = sessionStorage.getItem('token'); 
       if (!token) throw new Error("Token mancante");
 
       const response = await fetch('https://cnl-shop-backend.onrender.com/api/orders', {
@@ -320,7 +344,7 @@ export default function App() {
   }, [carrello, totaleCarrello, caricaOrdiniUtente]);
 
   const gestisciLogout = useCallback(() => {
-    localStorage.removeItem('token');
+    sessionStorage.removeItem('token');
     setUtenteLoggato(null); setOrdiniUtente([]); setTuttiGliOrdiniAdmin([]); setViewAdmin(false);
   }, []);
 
@@ -394,7 +418,7 @@ export default function App() {
       <div className="font-sans text-white antialiased min-h-screen">
         <Auth onLoginSuccess={(datiUtente) => {
           setUtenteLoggato(datiUtente);
-          const t = localStorage.getItem('token');
+          const t = sessionStorage.getItem('token');
           if(t) {
             if (datiUtente.is_admin) {
               setViewAdmin(true);
@@ -453,11 +477,11 @@ export default function App() {
                       <div>
                         <h4 className="font-bold text-base sm:text-lg text-blue-100">{item.nomeProdotto}</h4>
                         <p className="text-xs sm:text-sm text-white/70">Atleta: <span className="font-semibold text-white">{item.atleta}</span> | Taglia: <span className="font-semibold text-white">{item.taglia}</span></p>
-                        {item.colorePersonalizzato && (
+                        {(item.colorePersonalizzato || item.nomePersonalizzato || item.numeroPersonalizzato) && (
                           <p className="text-xs sm:text-sm text-cyan-300 mt-0.5">
-                            Colore: <span className="font-bold">{item.colorePersonalizzato}</span> 
-                            {item.nomePersonalizzato && ` | Nome: "${item.nomePersonalizzato}"`}
-                            {item.numeroPersonalizzato && ` | N° ${item.numeroPersonalizzato}`}
+                            {item.colorePersonalizzato && <span>Colore: <span className="font-bold">{item.colorePersonalizzato}</span> </span>}
+                            {item.nomePersonalizzato && <span>| Nome: "{item.nomePersonalizzato}" </span>}
+                            {item.numeroPersonalizzato && <span>| N° {item.numeroPersonalizzato}</span>}
                           </p>
                         )}
                       </div>
@@ -526,7 +550,7 @@ export default function App() {
               <div className="space-y-6">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
                   <div className="bg-white/5 border border-white/10 p-2.5 sm:p-4 rounded-xl text-center">
-                    <span className="text-[10px] sm:text-xs text-white/40 block font-bold uppercase">In Lavoro</span>
+                    <span className="text-[10px] sm:text-xs text-white/40 block font-bold uppercase">In Lavorazione</span>
                     <span className="text-lg sm:text-2xl font-black text-blue-400">{statisticheAdmin.inLavorazione}</span>
                   </div>
                   <div className="bg-white/5 border border-white/10 p-2.5 sm:p-4 rounded-xl text-center">
@@ -595,7 +619,6 @@ export default function App() {
                               </div>
                               <div className="flex items-center gap-3 w-full md:w-auto justify-between sm:justify-end">
                                 
-                                {/* CHECKBOX PAGATO PAYPAL */}
                                 <label className="flex items-center gap-1.5 cursor-pointer bg-slate-800/80 px-2.5 py-1 rounded-lg border border-white/10 hover:border-emerald-500/50 transition-colors">
                                   <input 
                                     type="checkbox" 
@@ -610,7 +633,6 @@ export default function App() {
 
                                 <span className="font-black text-sm sm:text-base text-cyan-300">€{ord.totale.toFixed(2)}</span>
                                 
-                                {/* SELECT STATO ORDINE */}
                                 <select 
                                   value={ord.stato_pagamento} 
                                   onChange={(e) => aggiornaOrdineAdmin(ord.id, { stato_pagamento: e.target.value })} 
@@ -690,11 +712,46 @@ export default function App() {
                       <label className="text-xs text-white/70 mb-1 block">Prezzo (€)</label>
                       <input type="number" step="0.01" value={nuovoProd.prezzo} onChange={e => setNuovoProd({...nuovoProd, prezzo: e.target.value})} className="w-full bg-slate-800 border border-white/20 rounded-xl p-2 text-xs sm:text-sm text-white" placeholder="0.00"/>
                     </div>
-                    <div className="flex items-center gap-2 py-2">
-                      <input type="checkbox" id="pers" checked={nuovoProd.personalizzabile} onChange={e => setNuovoProd({...nuovoProd, personalizzabile: e.target.checked})} className="w-4 h-4 accent-cyan-500 rounded cursor-pointer"/>
-                      <label htmlFor="pers" className="text-xs sm:text-sm font-semibold text-white/90 cursor-pointer">Abilita Personalizzazioni</label>
+
+                    {/* SELEZIONE INDIVIDUALE PERSONALIZZAZIONI */}
+                    <div className="space-y-1.5 py-1 bg-slate-800/60 p-2.5 rounded-xl border border-white/10">
+                      <span className="text-[11px] font-bold text-cyan-300 block mb-1">Personalizzazioni Abilitate:</span>
+                      
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="checkbox" 
+                          id="pers_nome" 
+                          checked={nuovoProd.personalizzabile_nome} 
+                          onChange={e => setNuovoProd({...nuovoProd, personalizzabile_nome: e.target.checked})} 
+                          className="w-4 h-4 accent-cyan-500 rounded cursor-pointer"
+                        />
+                        <label htmlFor="pers_nome" className="text-xs font-semibold text-white/90 cursor-pointer">Stampa Nome</label>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="checkbox" 
+                          id="pers_numero" 
+                          checked={nuovoProd.personalizzabile_numero} 
+                          onChange={e => setNuovoProd({...nuovoProd, personalizzabile_numero: e.target.checked})} 
+                          className="w-4 h-4 accent-cyan-500 rounded cursor-pointer"
+                        />
+                        <label htmlFor="pers_numero" className="text-xs font-semibold text-white/90 cursor-pointer">Stampa Numero</label>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="checkbox" 
+                          id="pers_colore" 
+                          checked={nuovoProd.personalizzabile_colore} 
+                          onChange={e => setNuovoProd({...nuovoProd, personalizzabile_colore: e.target.checked})} 
+                          className="w-4 h-4 accent-cyan-500 rounded cursor-pointer"
+                        />
+                        <label htmlFor="pers_colore" className="text-xs font-semibold text-white/90 cursor-pointer">Selezione Colore</label>
+                      </div>
                     </div>
                   </div>
+                  
                   <Button onClick={creaProdottoAdmin} className="mt-4 w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-slate-900 font-black rounded-xl px-6 py-2 text-sm shadow-lg">
                     + Salva Prodotto
                   </Button>
@@ -704,22 +761,35 @@ export default function App() {
                   <h3 className="text-lg sm:text-xl font-bold text-white mb-3">Prodotti nel Database ({prodotti.length})</h3>
                   {prodotti.length === 0 ? <p className="text-white/50 text-xs sm:text-sm">Nessun prodotto trovato.</p> : (
                     <div className="space-y-2.5">
-                      {prodotti.map(p => (
-                        <div key={`cat-prod-${p.id}`} className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-white/5 hover:border-white/10 transition-colors">
-                          <div className="flex items-center gap-3">
-                            {p.immagine_url && (
-                              <div className="w-10 h-10 rounded-lg bg-slate-950/40 border border-white/10 overflow-hidden flex items-center justify-center">
-                                <img src={p.immagine_url} alt="" className="w-full h-full object-contain" />
+                      {prodotti.map(p => {
+                        const opt = [];
+                        if (p.personalizzabile_nome) opt.push("Nome");
+                        if (p.personalizzabile_numero) opt.push("Numero");
+                        if (p.personalizzabile_colore) opt.push("Colore");
+
+                        return (
+                          <div key={`cat-prod-${p.id}`} className="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-white/5 hover:border-white/10 transition-colors">
+                            <div className="flex items-center gap-3">
+                              {p.immagine_url && (
+                                <div className="w-10 h-10 rounded-lg bg-slate-950/40 border border-white/10 overflow-hidden flex items-center justify-center">
+                                  <img src={p.immagine_url} alt="" className="w-full h-full object-contain" />
+                                </div>
+                              )}
+                              <div>
+                                <p className="font-bold text-white text-sm sm:text-base">{p.nome} <span className="text-cyan-300 ml-1">€{p.prezzo.toFixed(2)}</span></p>
+                                {opt.length > 0 ? (
+                                  <span className="text-[10px] text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full inline-block border border-amber-500/20">
+                                    Attivi: {opt.join(", ")}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-white/40 italic">Nessuna personalizzazione</span>
+                                )}
                               </div>
-                            )}
-                            <div>
-                              <p className="font-bold text-white text-sm sm:text-base">{p.nome} <span className="text-cyan-300 ml-1">€{p.prezzo.toFixed(2)}</span></p>
-                              {p.personalizzabile && <span className="text-[10px] text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full inline-block border border-amber-500/20">Personalizzabile</span>}
                             </div>
+                            <button onClick={() => eliminaProdottoAdmin(p.id)} className="bg-red-500/20 text-red-300 border border-red-500/30 hover:bg-red-500/40 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">Elimina</button>
                           </div>
-                          <button onClick={() => eliminarProdottoAdmin(p.id)} className="bg-red-500/20 text-red-300 border border-red-500/30 hover:bg-red-500/40 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">Elimina</button>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

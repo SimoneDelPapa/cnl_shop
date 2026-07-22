@@ -47,7 +47,7 @@ export default function Auth({ onLoginSuccess }) {
         if (!res.ok) throw new Error("Credenziali errate. Controlla email e password.");
         
         const data = await res.json();
-        localStorage.setItem('token', data.access_token);
+        sessionStorage.setItem('token', data.access_token);
         onLoginSuccess(data.utente);
 
       } else if (view === 'register') {
