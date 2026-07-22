@@ -59,10 +59,6 @@ def create_access_token(data: dict):
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-# --- CONFIGURAZIONE RESEND (EMAIL API) ---
-# Legge la chiave in modo sicuro dalle variabili d'ambiente di Render
-resend.api_key = os.getenv("RESEND_API_KEY")
-
 # --- MODELLI DATABASE ---
 class Utente(Base):
     __tablename__ = "utenti"
@@ -207,23 +203,51 @@ def get_current_admin(current_user: Utente = Depends(get_current_user)):
     return current_user
 
 # --- LOGICA INVIO EMAIL CON RESEND (BACKGROUND) ---
+import requests
+
 def invia_email_reset(nome: str, destinatario: str, link_reset: str):
+    api_key = os.getenv("BREVO_API_KEY")
+    if not api_key:
+        print("❌ ERRORE: La variabile BREVO_API_KEY non è impostata su Render!")
+        return
+
+    url = "https://api.brevo.com/v3/smtp/email"
+    
+    headers = {
+        "accept": "application/json",
+        "content-type": "application/json",
+        "api-key": api_key
+    }
+    
+    payload = {
+        "sender": {
+            "name": "CNL Shop",
+            "email": "cnl.pallanuotolucca@gmail.com"
+        },
+        "to": [
+            {
+                "email": destinatario,
+                "name": nome
+            }
+        ],
+        "subject": "Reset Password - CNL Shop",
+        "htmlContent": f"""
+            <p>Ciao <strong>{nome}</strong>,</p>
+            <p>Hai richiesto il reset della password per il tuo account CNL Shop.</p>
+            <p>Clicca sul pulsante qui sotto per impostare la nuova password (scade tra 15 minuti):</p>
+            <p><a href="{link_reset}" style="background-color: #0891b2; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">Reimposta Password</a></p>
+            <p>Se non hai richiesto tu il reset, ignora questa email.</p>
+        """
+    }
+
     try:
-        r = resend.Emails.send({
-            "from": "CNL Shop <onboarding@resend.dev>", # Mittente di default di Resend per i test
-            "to": [destinatario],
-            "subject": "Reset Password - CNL Shop",
-            "html": f"""
-                <p>Ciao <strong>{nome}</strong>,</p>
-                <p>Hai richiesto il reset della password per il tuo account CNL Shop.</p>
-                <p>Clicca sul pulsante qui sotto per impostare la nuova password (scade tra 15 minuti):</p>
-                <p><a href="{link_reset}" style="background-color: #0891b2; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">Reimposta Password</a></p>
-                <p>Se non hai richiesto tu il reset, ignora questa email.</p>
-            """
-        })
-        print(f"✅ EMAIL INVIATA CON SUCCESSO A {destinatario}: {r}")
+        response = requests.post(url, json=payload, headers=headers)
+        if response.status_code in [200, 201, 202]:
+            print(f"✅ EMAIL INVIATA CON SUCCESSO A {destinatario}")
+        else:
+            print(f"❌ ERRORE BREVO ({response.status_code}): {response.text}")
     except Exception as e:
-        print(f"❌ ERRORE DURANTE L'INVIO RESEND A {destinatario}: {e}")
+        print(f"❌ ERRORE CHIAMATA BREVO A {destinatario}: {e}")
 
 # --- ROTTE API UTENTI E RECUPERO PASSWORD ---
 
