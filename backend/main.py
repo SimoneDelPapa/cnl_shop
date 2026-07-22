@@ -14,9 +14,7 @@ from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 import jwt
 import bcrypt  
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import resend  # <-- Nuova libreria per l'invio mail
 
 from sqlalchemy import create_engine, Column, Integer, String, Float, ForeignKey, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session, joinedload
@@ -60,6 +58,10 @@ def create_access_token(data: dict):
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+# --- CONFIGURAZIONE RESEND (EMAIL API) ---
+# ⚠️ INSERISCI QUI LA TUA CHIAVE API DI RESEND (Inizia con re_...)
+resend.api_key = "re_DuST1yY8_5KepKdatKCeHMcsDTJqqLmpd"
 
 # --- MODELLI DATABASE ---
 class Utente(Base):
@@ -204,29 +206,24 @@ def get_current_admin(current_user: Utente = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Accesso negato. Solo Staff.")
     return current_user
 
-# --- LOGICA INVIO EMAIL (BACKGROUND) ---
+# --- LOGICA INVIO EMAIL CON RESEND (BACKGROUND) ---
 def invia_email_reset(nome: str, destinatario: str, link_reset: str):
-    mittente = "cnl.pallanuotolucca@gmail.com"  
-    password_app = "dymnbhadwwdwhjwp" # Spazi rimossi per evitare errori SMTP       
-    
     try:
-        msg = MIMEMultipart()
-        msg['From'] = f"CNL Shop <{mittente}>"
-        msg['To'] = destinatario
-        msg['Subject'] = "Reset Password - CNL Shop"
-        
-        corpo = f"Ciao {nome},\n\nHai richiesto il reset della password per il tuo account CNL Shop.\nClicca sul link sottostante per creare una nuova password (il link scadrà tra 15 minuti):\n\n{link_reset}\n\nSe non hai richiesto tu il reset, ignora questa email."
-        msg.attach(MIMEText(corpo, 'plain'))
-        
-        # Uso di SMTP_SSL sulla porta 465 (diretta, più sicura e che non va in timeout)
-        with smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10) as server:
-            server.login(mittente, password_app)
-            server.send_message(msg)
-            
-        print(f"✅ Email inviata con successo a {destinatario}")
+        r = resend.Emails.send({
+            "from": "CNL Shop <onboarding@resend.dev>", # Mittente di default di Resend per i test
+            "to": [destinatario],
+            "subject": "Reset Password - CNL Shop",
+            "html": f"""
+                <p>Ciao <strong>{nome}</strong>,</p>
+                <p>Hai richiesto il reset della password per il tuo account CNL Shop.</p>
+                <p>Clicca sul pulsante qui sotto per impostare la nuova password (scade tra 15 minuti):</p>
+                <p><a href="{link_reset}" style="background-color: #0891b2; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">Reimposta Password</a></p>
+                <p>Se non hai richiesto tu il reset, ignora questa email.</p>
+            """
+        })
+        print(f"✅ EMAIL INVIATA CON SUCCESSO A {destinatario}: {r}")
     except Exception as e:
-        print(f"❌ Errore durante l'invio della mail a {destinatario}: {e}")
-
+        print(f"❌ ERRORE DURANTE L'INVIO RESEND A {destinatario}: {e}")
 
 # --- ROTTE API UTENTI E RECUPERO PASSWORD ---
 
@@ -271,7 +268,7 @@ def forgot_password(req: ForgotPasswordRequest, background_tasks: BackgroundTask
     reset_token = jwt.encode({"sub": str(utente.id), "type": "reset", "exp": expire}, SECRET_KEY, algorithm=ALGORITHM)
     link_reset = f"https://simonedelpapa.github.io/cnl_shop/?reset={reset_token}"
     
-    # Invia la mail in background in modo da rispondere istantaneamente al frontend
+    # Invia la mail in background con Resend
     background_tasks.add_task(invia_email_reset, utente.nome, utente.email, link_reset)
 
     return {"messaggio": "Ok"}
