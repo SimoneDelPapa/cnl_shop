@@ -84,7 +84,6 @@ class Prodotto(Base):
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String, nullable=False)
     prezzo = Column(Float, nullable=False)
-    # Flag personalizzazione individuali
     personalizzabile_nome = Column(Boolean, default=False)
     personalizzabile_numero = Column(Boolean, default=False)
     personalizzabile_colore = Column(Boolean, default=False)
@@ -222,7 +221,7 @@ def get_current_admin(current_user: Utente = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Accesso negato. Solo Staff.")
     return current_user
 
-# --- LOGICA INVIO EMAIL ---
+# --- LOGICA INVIO EMAIL CON AVVISO SPAM ---
 def invia_email_reset(nome: str, destinatario: str, link_reset: str):
     api_key = os.getenv("BREVO_API_KEY")
     if not api_key:
@@ -244,6 +243,7 @@ def invia_email_reset(nome: str, destinatario: str, link_reset: str):
             <p>Hai richiesto il reset della password per il tuo account CNL Shop.</p>
             <p>Clicca sul pulsante qui sotto per impostare la nuova password (scade tra 15 minuti):</p>
             <p><a href="{link_reset}" style="background-color: #0891b2; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none; font-weight: bold; display: inline-block;">Reimposta Password</a></p>
+            <p style="color: #666; font-size: 12px; margin-top: 20px;">Se non vedi le nostre future comunicazioni, controlla sempre la cartella <strong>Spam / Posta Indesiderata</strong>.</p>
         """
     }
 

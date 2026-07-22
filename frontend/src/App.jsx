@@ -391,8 +391,17 @@ export default function App() {
     });
   }, [tuttiGliOrdiniAdmin, ricercaAdmin, filtroStatoAdmin]);
 
+  // --- STATISTICHE ADMIN (INCLUSO FONDO PALLANUOTO LUCCA) ---
   const statisticheAdmin = useMemo(() => {
-    const stats = { inLavorazione: 0, pronti: 0, completati: 0, incassoTotale: 0, incassoVerificato: 0 };
+    const stats = { 
+      inLavorazione: 0, 
+      pronti: 0, 
+      completati: 0, 
+      incassoTotale: 0, 
+      incassoVerificato: 0,
+      totaleArticoliVenduti: 0 
+    };
+
     tuttiGliOrdiniAdmin.forEach(o => {
       if (o.stato_pagamento === 'In lavorazione') stats.inLavorazione++;
       if (o.stato_pagamento === 'Pronto per il ritiro') stats.pronti++;
@@ -400,7 +409,13 @@ export default function App() {
       
       stats.incassoTotale += o.totale;
       if (o.pagato) stats.incassoVerificato += o.totale;
+
+      // Incrementa 1 euro per ciascun articolo contenuto negli ordini
+      if (o.articoli) {
+        stats.totaleArticoliVenduti += o.articoli.length;
+      }
     });
+
     return stats;
   }, [tuttiGliOrdiniAdmin]);
 
@@ -548,7 +563,9 @@ export default function App() {
 
             {adminTab === 'ordini' && (
               <div className="space-y-6">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
+                
+                {/* RIGHI DELLE STATISTICHE ADMIN */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-4">
                   <div className="bg-white/5 border border-white/10 p-2.5 sm:p-4 rounded-xl text-center">
                     <span className="text-[10px] sm:text-xs text-white/40 block font-bold uppercase">In Lavorazione</span>
                     <span className="text-lg sm:text-2xl font-black text-blue-400">{statisticheAdmin.inLavorazione}</span>
@@ -564,6 +581,13 @@ export default function App() {
                   <div className="bg-white/5 border border-emerald-500/20 p-2.5 sm:p-4 rounded-xl text-center bg-emerald-500/5">
                     <span className="text-[10px] sm:text-xs text-emerald-400 block font-bold uppercase">Verificato Paypal</span>
                     <span className="text-base sm:text-xl font-black text-white">€{statisticheAdmin.incassoVerificato.toFixed(2)}</span>
+                  </div>
+
+                  {/* CASSETA STATISTICA FONDO PALLANUOTO LUCCA */}
+                  <div className="bg-emerald-950/40 border border-emerald-500/30 p-2.5 sm:p-4 rounded-xl text-center col-span-2 sm:col-span-1 bg-gradient-to-br from-emerald-500/10 to-teal-500/5 shadow-lg">
+                    <span className="text-[10px] sm:text-xs text-emerald-300 block font-black uppercase tracking-wider">Fondo PN Lucca</span>
+                    <span className="text-base sm:text-xl font-black text-emerald-400">€{statisticheAdmin.totaleArticoliVenduti.toFixed(2)}</span>
+                    <span className="text-[9px] text-emerald-200/60 block font-semibold">1€ x {statisticheAdmin.totaleArticoliVenduti} capi</span>
                   </div>
                 </div>
 
