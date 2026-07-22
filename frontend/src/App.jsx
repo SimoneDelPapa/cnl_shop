@@ -458,7 +458,7 @@ export default function App() {
     <div className="min-h-screen p-3 sm:p-6 md:p-12 font-sans text-white antialiased">
       <header className="max-w-5xl mx-auto bg-white/10 backdrop-blur-xl border border-white/20 p-4 sm:p-8 rounded-2xl sm:rounded-3xl shadow-[0_8px_32px_0_rgba(0,0,0,0.37)] mb-6 sm:mb-10 text-center relative">
         <h1 className="text-2xl sm:text-4xl md:text-5xl font-black tracking-wider uppercase bg-gradient-to-r from-white via-blue-100 to-blue-200 bg-clip-text text-transparent drop-shadow-sm">CNL Shop</h1>
-        <p className="mt-1 sm:mt-3 text-blue-200/80 text-xs sm:text-lg font-medium">Circolo Nuoto Lucca - Abbigliamento Sportivo</p>
+        <p className="mt-1 sm:mt-3 text-blue-200/80 text-xs sm:text-lg font-medium">Circolo Nuoto Lucca - Merchandise B-personal</p>
         
         <div className="mt-4 sm:mt-6 pt-3 sm:pt-4 border-t border-white/10 flex flex-col sm:flex-row justify-between items-center gap-3">
           <p className="text-xs sm:text-sm text-white/70 text-center sm:text-left">
@@ -564,8 +564,8 @@ export default function App() {
           /* --- VISTA ADMIN (STAFF) --- */
           <div className="space-y-6 sm:space-y-8 animate-fadeIn">
             <div className="flex flex-row gap-2 border-b border-white/10 pb-3 overflow-x-auto">
-              <button onClick={() => setAdminTab('ordini')} className={`px-3 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap ${adminTab === 'ordini' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-lg' : 'text-white/50 hover:bg-white/5'}`}>📦 Gestione Ordini</button>
-              <button onClick={() => setAdminTab('catalogo')} className={`px-3 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap ${adminTab === 'catalogo' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-lg' : 'text-white/50 hover:bg-white/5'}`}>👕 Gestione Catalogo</button>
+              <button onClick={() => setAdminTab('ordini')} className={`px-3 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap ${adminTab === 'ordini' ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shadow-lg' : 'text-white/50 hover:bg-white/5'}`}>Gestione Ordini</button>
+              <button onClick={() => setAdminTab('catalogo')} className={`px-3 sm:px-5 py-2 rounded-xl text-xs sm:text-sm font-bold transition-all whitespace-nowrap ${adminTab === 'catalogo' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30 shadow-lg' : 'text-white/50 hover:bg-white/5'}`}>Gestione Catalogo</button>
             </div>
 
             {adminTab === 'ordini' && (
@@ -756,7 +756,7 @@ export default function App() {
                           onChange={e => setNuovoProd({...nuovoProd, personalizzabile_nome: e.target.checked})} 
                           className="w-4 h-4 accent-cyan-500 rounded cursor-pointer"
                         />
-                        <label htmlFor="pers_nome" className="text-xs font-semibold text-white/90 cursor-pointer">Stampa Nome</label>
+                        <label htmlFor="pers_nome" className="text-xs font-semibold text-white/90 cursor-pointer">Nome</label>
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -767,7 +767,7 @@ export default function App() {
                           onChange={e => setNuovoProd({...nuovoProd, personalizzabile_numero: e.target.checked})} 
                           className="w-4 h-4 accent-cyan-500 rounded cursor-pointer"
                         />
-                        <label htmlFor="pers_numero" className="text-xs font-semibold text-white/90 cursor-pointer">Stampa Numero</label>
+                        <label htmlFor="pers_numero" className="text-xs font-semibold text-white/90 cursor-pointer">Numero</label>
                       </div>
 
                       <div className="flex items-center gap-2">
@@ -778,13 +778,13 @@ export default function App() {
                           onChange={e => setNuovoProd({...nuovoProd, personalizzabile_colore: e.target.checked})} 
                           className="w-4 h-4 accent-cyan-500 rounded cursor-pointer"
                         />
-                        <label htmlFor="pers_colore" className="text-xs font-semibold text-white/90 cursor-pointer">Selezione Colore</label>
+                        <label htmlFor="pers_colore" className="text-xs font-semibold text-white/90 cursor-pointer">Colore</label>
                       </div>
                     </div>
                   </div>
                   
                   <Button onClick={creaProdottoAdmin} className="mt-4 w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-slate-900 font-black rounded-xl px-6 py-2 text-sm shadow-lg">
-                    + Salva Prodotto
+                    Salva Prodotto
                   </Button>
                 </div>
 
