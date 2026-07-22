@@ -11,6 +11,8 @@ function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
   const [atleta, setAtleta] = useState('');
   const [taglia, setTaglia] = useState('M');
   const [nomePers, setNomePers] = useState('');
+  const [colorePers, setColorePers] = useState('NERA');
+  const [numeroPers, setNumeroPers] = useState('');
 
   const handleAdd = () => {
     if (!atleta.trim()) {
@@ -29,11 +31,14 @@ function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
       prezzo: prodotto.prezzo,
       atleta: atleta.trim(),
       taglia: taglia,
-      nomePersonalizzato: prodotto.personalizzabile ? nomePers.trim() : null
+      nomePersonalizzato: prodotto.personalizzabile ? nomePers.trim() : null,
+      colorePersonalizzato: prodotto.personalizzabile ? colorePers : null,
+      numeroPersonalizzato: prodotto.personalizzabile ? numeroPers.trim() : null
     });
     
     setAtleta('');
     setNomePers('');
+    setNumeroPers('');
   };
 
   return (
@@ -88,13 +93,36 @@ function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
                 <option value="XL">XL</option>
               </select>
             </div>
+
             {prodotto.personalizzabile && (
-              <div>
-                <label className="text-xs text-white/70 font-semibold mb-1 block">Testo Personalizzato</label>
-                <input 
-                  type="text" value={nomePers} onChange={e => setNomePers(e.target.value.toUpperCase())} placeholder="Es. GIULIA 10"
-                  className="w-full bg-white/5 border border-white/20 rounded-lg p-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-400 font-bold"
-                />
+              <div className="space-y-2 border-t border-white/10 pt-2">
+                <div>
+                  <label className="text-xs text-white/70 font-semibold mb-1 block">Colore Capo</label>
+                  <select 
+                    value={colorePers} onChange={e => setColorePers(e.target.value)}
+                    className="w-full bg-white/5 border border-white/20 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-400 [&>option]:text-slate-900 appearance-none font-bold"
+                  >
+                    <option value="NERA">NERA</option>
+                    <option value="BIANCA">BIANCA</option>
+                    <option value="ROSSA">ROSSA</option>
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-xs text-white/70 font-semibold mb-1 block">Nome Stampa</label>
+                    <input 
+                      type="text" value={nomePers} onChange={e => setNomePers(e.target.value.toUpperCase())} placeholder="Es. GIULIA"
+                      className="w-full bg-white/5 border border-white/20 rounded-lg p-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-400 font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-white/70 font-semibold mb-1 block">Numero Stampa</label>
+                    <input 
+                      type="text" value={numeroPers} onChange={e => setNumeroPers(e.target.value)} placeholder="Es. 10"
+                      className="w-full bg-white/5 border border-white/20 rounded-lg p-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:ring-2 focus:ring-blue-400 font-bold"
+                    />
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -229,13 +257,13 @@ export default function App() {
     } catch (err) { alert("Errore eliminazione prodotto"); }
   }, [caricaProdotti]);
 
-  const cambiaStatoOrdineAdmin = useCallback(async (ordineId, nuovoStato) => {
+  const aggiornaOrdineAdmin = useCallback(async (ordineId, datiAggiornati) => {
     const token = localStorage.getItem('token');
     try {
       const response = await fetch(`https://cnl-shop-backend.onrender.com/api/admin/orders/${ordineId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ stato_pagamento: nuovoStato })
+        body: JSON.stringify(datiAggiornati)
       });
       if (response.ok) await caricaOrdiniGlobaliAdmin(token);
     } catch (err) { console.error(err); }
@@ -296,7 +324,6 @@ export default function App() {
     setUtenteLoggato(null); setOrdiniUtente([]); setTuttiGliOrdiniAdmin([]); setViewAdmin(false);
   }, []);
 
-  // --- RAGGRUPPAMENTO ORDINI PER UTENTE (ADMIN) ---
   const ordiniAdminRaggruppatiPerUtente = useMemo(() => {
     const gruppiMap = new Map();
 
@@ -317,17 +344,22 @@ export default function App() {
             acquirente: ord.acquirente,
             email: chiaveUtente,
             ordini: [],
-            totaleSpeso: 0
+            totaleDovuto: 0,
+            totalePagato: 0
           });
         }
         
         const gruppo = gruppiMap.get(chiaveUtente);
         gruppo.ordini.push(ord);
-        gruppo.totaleSpeso += ord.totale;
+
+        if (ord.pagato) {
+          gruppo.totalePagato += ord.totale;
+        } else {
+          gruppo.totaleDovuto += ord.totale;
+        }
       }
     });
 
-    // Convertiamo in Array e ordiniamo cronologicamente (i gruppi con gli ordini più recenti in cima)
     return Array.from(gruppiMap.values()).sort((a, b) => {
       const maxIdA = Math.max(...a.ordini.map(o => o.id));
       const maxIdB = Math.max(...b.ordini.map(o => o.id));
@@ -336,13 +368,14 @@ export default function App() {
   }, [tuttiGliOrdiniAdmin, ricercaAdmin, filtroStatoAdmin]);
 
   const statisticheAdmin = useMemo(() => {
-    const stats = { inAttesa: 0, inLavorazione: 0, pronti: 0, completati: 0, incassoTotale: 0 };
+    const stats = { inLavorazione: 0, pronti: 0, completati: 0, incassoTotale: 0, incassoVerificato: 0 };
     tuttiGliOrdiniAdmin.forEach(o => {
-      if (o.stato_pagamento === 'In attesa') stats.inAttesa++;
       if (o.stato_pagamento === 'In lavorazione') stats.inLavorazione++;
       if (o.stato_pagamento === 'Pronto per il ritiro') stats.pronti++;
       if (o.stato_pagamento === 'Completato') stats.completati++;
+      
       stats.incassoTotale += o.totale;
+      if (o.pagato) stats.incassoVerificato += o.totale;
     });
     return stats;
   }, [tuttiGliOrdiniAdmin]);
@@ -383,7 +416,7 @@ export default function App() {
         
         <div className="mt-4 sm:mt-6 pt-3 sm:pt-4 border-t border-white/10 flex flex-col sm:flex-row justify-between items-center gap-3">
           <p className="text-xs sm:text-sm text-white/70 text-center sm:text-left">
-            Accesso come <strong className="text-white">{utenteLoggato.nome}</strong>
+            Accesso come <strong className="text-white">{utenteLoggato.nome} {utenteLoggato.cognome}</strong>
             {utenteLoggato.is_admin && <span className="text-[10px] sm:text-xs ml-2 bg-amber-500/20 border border-amber-400/30 text-amber-300 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">Staff</span>}
           </p>
           <div className="flex flex-wrap justify-center gap-2 w-full sm:w-auto">
@@ -420,7 +453,13 @@ export default function App() {
                       <div>
                         <h4 className="font-bold text-base sm:text-lg text-blue-100">{item.nomeProdotto}</h4>
                         <p className="text-xs sm:text-sm text-white/70">Atleta: <span className="font-semibold text-white">{item.atleta}</span> | Taglia: <span className="font-semibold text-white">{item.taglia}</span></p>
-                        {item.nomePersonalizzato && <p className="text-xs sm:text-sm text-cyan-300 mt-0.5">Stampa: "{item.nomePersonalizzato}"</p>}
+                        {item.colorePersonalizzato && (
+                          <p className="text-xs sm:text-sm text-cyan-300 mt-0.5">
+                            Colore: <span className="font-bold">{item.colorePersonalizzato}</span> 
+                            {item.nomePersonalizzato && ` | Nome: "${item.nomePersonalizzato}"`}
+                            {item.numeroPersonalizzato && ` | N° ${item.numeroPersonalizzato}`}
+                          </p>
+                        )}
                       </div>
                       <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 pt-2 sm:pt-0 border-white/5 mt-1 sm:mt-0">
                         <span className="font-black text-lg sm:text-xl">€{item.prezzo.toFixed(2)}</span>
@@ -450,14 +489,19 @@ export default function App() {
                       <div key={`user-ord-${ord.id}`} className="bg-white/5 border border-white/10 rounded-2xl p-4 sm:p-6 shadow-md">
                         <div className="flex justify-between items-center border-b border-white/10 pb-3 mb-3">
                           <h3 className="text-base sm:text-xl font-bold text-blue-200">Ordine #{ord.id}</h3>
-                          <Badge className={`px-2.5 py-0.5 text-[10px] sm:text-xs rounded-full border ${ord.stato_pagamento === 'In attesa' ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/30' : 'bg-green-500/20 text-green-300 border-green-500/30'}`}>{ord.stato_pagamento}</Badge>
+                          <Badge className={`px-2.5 py-0.5 text-[10px] sm:text-xs rounded-full border ${ord.stato_pagamento === 'Completato' ? 'bg-green-500/20 text-green-300 border-green-500/30' : 'bg-blue-500/20 text-blue-300 border-blue-500/30'}`}>{ord.stato_pagamento}</Badge>
                         </div>
                         <div className="divide-y divide-white/5 space-y-2">
                           {ord.articoli.map((art, idx) => (
                             <div key={`user-art-${idx}`} className="pt-2 first:pt-0 flex justify-between items-center text-xs sm:text-sm">
                               <div>
                                 <p className="font-bold text-white/90">{art.nome_prodotto} <span className="text-[10px] sm:text-xs text-white/40">({art.taglia})</span></p>
-                                <p className="text-[11px] sm:text-xs text-white/60">Destinatario: <span className="text-white">{art.atleta}</span> {art.nome_personalizzato && <span> | Stampa: <span className="text-cyan-400">"{art.nome_personalizzato}"</span></span>}</p>
+                                <p className="text-[11px] sm:text-xs text-white/60">
+                                  Destinatario: <span className="text-white">{art.atleta}</span> 
+                                  {art.colore_personalizzato && <span> | Colore: <span className="text-cyan-400">{art.colore_personalizzato}</span></span>}
+                                  {art.nome_personalizzato && <span> | Stampa: <span className="text-cyan-400">"{art.nome_personalizzato}"</span></span>}
+                                  {art.numero_personalizzato && <span> | N°: <span className="text-cyan-400">{art.numero_personalizzato}</span></span>}
+                                </p>
                               </div>
                               <span className="font-semibold text-white/80 ml-2">€{art.prezzo.toFixed(2)}</span>
                             </div>
@@ -480,11 +524,7 @@ export default function App() {
 
             {adminTab === 'ordini' && (
               <div className="space-y-6">
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 sm:gap-4">
-                  <div className="bg-white/5 border border-white/10 p-2.5 sm:p-4 rounded-xl text-center">
-                    <span className="text-[10px] sm:text-xs text-white/40 block font-bold uppercase">In Attesa</span>
-                    <span className="text-lg sm:text-2xl font-black text-yellow-400">{statisticheAdmin.inAttesa}</span>
-                  </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 sm:gap-4">
                   <div className="bg-white/5 border border-white/10 p-2.5 sm:p-4 rounded-xl text-center">
                     <span className="text-[10px] sm:text-xs text-white/40 block font-bold uppercase">In Lavoro</span>
                     <span className="text-lg sm:text-2xl font-black text-blue-400">{statisticheAdmin.inLavorazione}</span>
@@ -497,9 +537,9 @@ export default function App() {
                     <span className="text-[10px] sm:text-xs text-white/40 block font-bold uppercase">Completati</span>
                     <span className="text-lg sm:text-2xl font-black text-green-400">{statisticheAdmin.completati}</span>
                   </div>
-                  <div className="bg-white/5 border border-cyan-500/20 p-2.5 sm:p-4 rounded-xl text-center col-span-2 sm:col-span-1 bg-cyan-500/5">
-                    <span className="text-[10px] sm:text-xs text-cyan-400 block font-bold uppercase">Totale Incasso</span>
-                    <span className="text-base sm:text-xl font-black text-white">€{statisticheAdmin.incassoTotale.toFixed(2)}</span>
+                  <div className="bg-white/5 border border-emerald-500/20 p-2.5 sm:p-4 rounded-xl text-center bg-emerald-500/5">
+                    <span className="text-[10px] sm:text-xs text-emerald-400 block font-bold uppercase">Verificato Paypal</span>
+                    <span className="text-base sm:text-xl font-black text-white">€{statisticheAdmin.incassoVerificato.toFixed(2)}</span>
                   </div>
                 </div>
 
@@ -518,7 +558,6 @@ export default function App() {
                       className="bg-slate-800 border border-white/20 rounded-xl px-3 py-2 text-xs sm:text-sm text-white font-semibold cursor-pointer focus:outline-none focus:ring-2 focus:ring-cyan-400"
                     >
                       <option value="Tutti">Tutti gli stati</option>
-                      <option value="In attesa">In attesa</option>
                       <option value="In lavorazione">In lavorazione</option>
                       <option value="Pronto per il ritiro">Pronto per il ritiro</option>
                       <option value="Completato">Completato</option>
@@ -531,7 +570,6 @@ export default function App() {
                 {ordiniAdminRaggruppatiPerUtente.length === 0 ? (
                   <p className="text-white/50 text-center py-8 bg-white/5 rounded-2xl italic border border-white/5 text-xs sm:text-sm">Nessun ordine trovato.</p>
                 ) : (
-                  /* --- CICLO SUI GRUPPI UTENTE --- */
                   ordiniAdminRaggruppatiPerUtente.map((gruppo) => (
                     <div key={`gruppo-user-${gruppo.email}`} className="bg-slate-900/60 border border-white/15 rounded-2xl sm:rounded-3xl p-4 sm:p-6 shadow-2xl space-y-4">
                       
@@ -547,7 +585,7 @@ export default function App() {
                         </Badge>
                       </div>
 
-                      {/* LISTA DEGLI ORDINI CRONOLOGICI DELL'UTENTE */}
+                      {/* LISTA ORDINI DELL'UTENTE */}
                       <div className="space-y-3">
                         {gruppo.ordini.map((ord) => (
                           <div key={`admin-ord-${ord.id}`} className="bg-white/5 border border-white/10 rounded-xl sm:rounded-2xl p-3 sm:p-4">
@@ -556,13 +594,28 @@ export default function App() {
                                 <h4 className="text-sm sm:text-lg font-bold text-blue-200">Ordine #{ord.id}</h4>
                               </div>
                               <div className="flex items-center gap-3 w-full md:w-auto justify-between sm:justify-end">
+                                
+                                {/* CHECKBOX PAGATO PAYPAL */}
+                                <label className="flex items-center gap-1.5 cursor-pointer bg-slate-800/80 px-2.5 py-1 rounded-lg border border-white/10 hover:border-emerald-500/50 transition-colors">
+                                  <input 
+                                    type="checkbox" 
+                                    checked={ord.pagato} 
+                                    onChange={(e) => aggiornaOrdineAdmin(ord.id, { pagato: e.target.checked })}
+                                    className="w-4 h-4 accent-emerald-500 rounded cursor-pointer"
+                                  />
+                                  <span className={`text-xs font-bold ${ord.pagato ? 'text-emerald-400' : 'text-white/50'}`}>
+                                    {ord.pagato ? '✓ Pagato PayPal' : 'Non Pagato'}
+                                  </span>
+                                </label>
+
                                 <span className="font-black text-sm sm:text-base text-cyan-300">€{ord.totale.toFixed(2)}</span>
+                                
+                                {/* SELECT STATO ORDINE */}
                                 <select 
                                   value={ord.stato_pagamento} 
-                                  onChange={(e) => cambiaStatoOrdineAdmin(ord.id, e.target.value)} 
+                                  onChange={(e) => aggiornaOrdineAdmin(ord.id, { stato_pagamento: e.target.value })} 
                                   className="bg-slate-800 border border-white/20 rounded-lg px-2 py-1 text-xs text-white font-bold focus:outline-none focus:ring-2 focus:ring-cyan-400"
                                 >
-                                  <option value="In attesa">In attesa</option>
                                   <option value="In lavorazione">In lavorazione</option>
                                   <option value="Pronto per il ritiro">Pronto per il ritiro</option>
                                   <option value="Completato">Completato</option>
@@ -574,7 +627,12 @@ export default function App() {
                                 <div key={`admin-art-${idx}`} className="flex justify-between items-center text-xs text-white/80">
                                   <div>
                                     <span className="font-bold text-white">{art.nome_prodotto}</span> <span className="text-white/50">({art.taglia})</span>
-                                    <span className="text-white/60 ml-2">Destinatario: <strong className="text-white">{art.atleta}</strong> {art.nome_personalizzato && ` | Stampa: "${art.nome_personalizzato}"`}</span>
+                                    <span className="text-white/60 ml-2">
+                                      Atleta: <strong className="text-white">{art.atleta}</strong> 
+                                      {art.colore_personalizzato && ` | Colore: ${art.colore_personalizzato}`}
+                                      {art.nome_personalizzato && ` | Nome: "${art.nome_personalizzato}"`}
+                                      {art.numero_personalizzato && ` | N° ${art.numero_personalizzato}`}
+                                    </span>
                                   </div>
                                   <span className="font-semibold">€{art.prezzo.toFixed(2)}</span>
                                 </div>
@@ -584,10 +642,21 @@ export default function App() {
                         ))}
                       </div>
 
-                      {/* RIEPILOGO TOTALE UTENTE */}
-                      <div className="bg-cyan-950/40 border border-cyan-500/30 rounded-xl p-3.5 flex justify-between items-center mt-2">
-                        <span className="text-xs sm:text-sm font-bold text-cyan-200 uppercase tracking-wider">Totale dovuti/pagati da questo account:</span>
-                        <span className="text-base sm:text-2xl font-black text-emerald-400">€{gruppo.totaleSpeso.toFixed(2)}</span>
+                      {/* RIEPILOGO TOTALE DOVUTO E TOTALE PAGATO */}
+                      <div className="bg-slate-950/60 border border-white/10 rounded-xl p-3.5 flex flex-col sm:flex-row justify-between items-center gap-2 mt-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-bold text-white/60 uppercase tracking-wider">Riepilogo Account:</span>
+                        </div>
+                        <div className="flex items-center gap-6">
+                          <div>
+                            <span className="text-[11px] text-amber-300/80 block uppercase font-bold">Totale Dovuto</span>
+                            <span className="text-sm sm:text-lg font-black text-amber-400">€{gruppo.totaleDovuto.toFixed(2)}</span>
+                          </div>
+                          <div className="border-l border-white/10 pl-6">
+                            <span className="text-[11px] text-emerald-300/80 block uppercase font-bold">Totale Pagato</span>
+                            <span className="text-sm sm:text-lg font-black text-emerald-400">€{gruppo.totalePagato.toFixed(2)}</span>
+                          </div>
+                        </div>
                       </div>
 
                     </div>
@@ -623,7 +692,7 @@ export default function App() {
                     </div>
                     <div className="flex items-center gap-2 py-2">
                       <input type="checkbox" id="pers" checked={nuovoProd.personalizzabile} onChange={e => setNuovoProd({...nuovoProd, personalizzabile: e.target.checked})} className="w-4 h-4 accent-cyan-500 rounded cursor-pointer"/>
-                      <label htmlFor="pers" className="text-xs sm:text-sm font-semibold text-white/90 cursor-pointer">Stampa retro</label>
+                      <label htmlFor="pers" className="text-xs sm:text-sm font-semibold text-white/90 cursor-pointer">Abilita Personalizzazioni</label>
                     </div>
                   </div>
                   <Button onClick={creaProdottoAdmin} className="mt-4 w-full sm:w-auto bg-amber-500 hover:bg-amber-600 text-slate-900 font-black rounded-xl px-6 py-2 text-sm shadow-lg">
@@ -648,7 +717,7 @@ export default function App() {
                               {p.personalizzabile && <span className="text-[10px] text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full inline-block border border-amber-500/20">Personalizzabile</span>}
                             </div>
                           </div>
-                          <button onClick={() => eliminaProdottoAdmin(p.id)} className="bg-red-500/20 text-red-300 border border-red-500/30 hover:bg-red-500/40 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">Elimina</button>
+                          <button onClick={() => eliminarProdottoAdmin(p.id)} className="bg-red-500/20 text-red-300 border border-red-500/30 hover:bg-red-500/40 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors">Elimina</button>
                         </div>
                       ))}
                     </div>

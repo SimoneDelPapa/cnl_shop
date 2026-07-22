@@ -17,6 +17,7 @@ export default function Auth({ onLoginSuccess }) {
   const [messaggio, setMessaggio] = useState('');
 
   const [nome, setNome] = useState('');
+  const [cognome, setCognome] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [resetToken, setResetToken] = useState('');
@@ -53,7 +54,7 @@ export default function Auth({ onLoginSuccess }) {
         const res = await fetch('https://cnl-shop-backend.onrender.com/api/register', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ nome, email, password })
+          body: JSON.stringify({ nome, cognome, email, password })
         });
         if (!res.ok) {
           const errData = await res.json();
@@ -125,13 +126,23 @@ export default function Auth({ onLoginSuccess }) {
 
           <form onSubmit={handleSubmit} className="space-y-3 mt-2">
             {view === 'register' && (
-              <div>
-                <label className="text-xs font-semibold text-white/70 block mb-1">Nome e Cognome</label>
-                <input 
-                  type="text" required value={nome} onChange={e => setNome(e.target.value)}
-                  className="w-full bg-slate-900/50 border border-white/20 rounded-xl p-2.5 text-xs sm:text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-400"
-                  placeholder="Es. Mario Rossi"
-                />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs font-semibold text-white/70 block mb-1">Nome</label>
+                  <input 
+                    type="text" required value={nome} onChange={e => setNome(e.target.value)}
+                    className="w-full bg-slate-900/50 border border-white/20 rounded-xl p-2.5 text-xs sm:text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                    placeholder="Es. Mario"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-white/70 block mb-1">Cognome</label>
+                  <input 
+                    type="text" required value={cognome} onChange={e => setCognome(e.target.value)}
+                    className="w-full bg-slate-900/50 border border-white/20 rounded-xl p-2.5 text-xs sm:text-sm text-white focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                    placeholder="Es. Rossi"
+                  />
+                </div>
               </div>
             )}
 

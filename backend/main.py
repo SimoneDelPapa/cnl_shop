@@ -74,6 +74,7 @@ class Utente(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     nome = Column(String, nullable=False)
+    cognome = Column(String, nullable=False, default="") # Nuova colonna
     hashed_password = Column(String, nullable=False)
     is_attivo = Column(Boolean, default=True)
     is_admin = Column(Boolean, default=False) 
@@ -90,7 +91,8 @@ class Ordine(Base):
     __tablename__ = "ordini"
     id = Column(Integer, primary_key=True, index=True)
     totale = Column(Float, nullable=False)
-    stato_pagamento = Column(String, default="In attesa")
+    stato_pagamento = Column(String, default="In lavorazione")
+    pagato = Column(Boolean, default=False)
     utente_id = Column(Integer, ForeignKey("utenti.id"), nullable=True) 
     
     articoli = relationship("ArticoloOrdine", back_populates="ordine")
@@ -106,6 +108,8 @@ class ArticoloOrdine(Base):
     atleta = Column(String, nullable=False)
     taglia = Column(String, nullable=False)
     nome_personalizzato = Column(String, nullable=True)
+    colore_personalizzato = Column(String, nullable=True) # Nuova colonna
+    numero_personalizzato = Column(String, nullable=True) # Nuova colonna
 
     ordine = relationship("Ordine", back_populates="articoli")
 
@@ -114,6 +118,7 @@ Base.metadata.create_all(bind=engine)
 # --- SCHEMI PYDANTIC ---
 class UtenteCreate(BaseModel):
     nome: str
+    cognome: str
     email: EmailStr
     password: str
 
@@ -125,6 +130,7 @@ class UtenteResponse(BaseModel):
     id: int
     email: EmailStr
     nome: str
+    cognome: str
     is_attivo: bool
     is_admin: bool 
     class Config:
@@ -146,13 +152,16 @@ class ArticoloCarrello(BaseModel):
     atleta: str
     taglia: str
     nomePersonalizzato: Optional[str] = None
+    colorePersonalizzato: Optional[str] = None
+    numeroPersonalizzato: Optional[str] = None
 
 class OrdineCreate(BaseModel):
     totale: float
     carrello: List[ArticoloCarrello]
 
 class UpdateStatoOrdine(BaseModel):
-    stato_pagamento: str
+    stato_pagamento: Optional[str] = None
+    pagato: Optional[bool] = None
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
@@ -204,7 +213,7 @@ def get_current_admin(current_user: Utente = Depends(get_current_user)):
         raise HTTPException(status_code=403, detail="Accesso negato. Solo Staff.")
     return current_user
 
-# --- LOGICA INVIO EMAIL (BACKGROUND) ---
+# --- LOGICA INVIO EMAIL ---
 def invia_email_reset(nome: str, destinatario: str, link_reset: str):
     api_key = os.getenv("BREVO_API_KEY")
     if not api_key:
@@ -247,7 +256,7 @@ def registra_utente(utente: UtenteCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Email già registrata")
     
     hashed_pwd = get_password_hash(utente.password)
-    nuovo_utente = Utente(email=utente.email, nome=utente.nome, hashed_password=hashed_pwd)
+    nuovo_utente = Utente(email=utente.email, nome=utente.nome, cognome=utente.cognome, hashed_password=hashed_pwd)
     
     db.add(nuovo_utente)
     db.commit()
@@ -264,7 +273,13 @@ def login_utente(credenziali: UtenteLogin, db: Session = Depends(get_db)):
     return {
         "access_token": access_token, 
         "token_type": "bearer",
-        "utente": {"id": utente.id, "email": utente.email, "nome": utente.nome, "is_admin": utente.is_admin}
+        "utente": {
+            "id": utente.id, 
+            "email": utente.email, 
+            "nome": utente.nome, 
+            "cognome": utente.cognome,
+            "is_admin": utente.is_admin
+        }
     }
 
 @app.get("/api/users/me", response_model=UtenteResponse)
@@ -331,7 +346,9 @@ def crea_ordine(ordine_in: OrdineCreate, db: Session = Depends(get_db), current_
                 prezzo=item.prezzo,
                 atleta=item.atleta,
                 taglia=item.taglia,
-                nome_personalizzato=item.nomePersonalizzato
+                nome_personalizzato=item.nomePersonalizzato,
+                colore_personalizzato=item.colorePersonalizzato,
+                numero_personalizzato=item.numeroPersonalizzato
             )
             db.add(nuovo_articolo)
         
@@ -347,8 +364,20 @@ def ottieni_ordini_utente(db: Session = Depends(get_db), current_user: Utente = 
     risposta = []
     for o in ordini:
         risposta.append({
-            "id": o.id, "totale": o.totale, "stato_pagamento": o.stato_pagamento,
-            "articoli": [{"prodotto_id": art.prodotto_id, "nome_prodotto": art.nome_prodotto, "prezzo": art.prezzo, "atleta": art.atleta, "taglia": art.taglia, "nome_personalizzato": art.nome_personalizzato} for art in o.articoli]
+            "id": o.id, 
+            "totale": o.totale, 
+            "stato_pagamento": o.stato_pagamento,
+            "pagato": o.pagato,
+            "articoli": [{
+                "prodotto_id": art.prodotto_id, 
+                "nome_prodotto": art.nome_prodotto, 
+                "prezzo": art.prezzo, 
+                "atleta": art.atleta, 
+                "taglia": art.taglia, 
+                "nome_personalizzato": art.nome_personalizzato,
+                "colore_personalizzato": art.colore_personalizzato,
+                "numero_personalizzato": art.numero_personalizzato
+            } for art in o.articoli]
         })
     return risposta
 
@@ -359,10 +388,23 @@ def admin_ottieni_tutti_gli_ordini(db: Session = Depends(get_db), admin_user: Ut
     ordini = db.query(Ordine).options(joinedload(Ordine.articoli), joinedload(Ordine.utente)).order_by(Ordine.id.desc()).all()
     risposta = []
     for o in ordini:
+        acquirente_nome_completo = f"{o.utente.nome} {o.utente.cognome}".strip() if o.utente else "Sconosciuto"
         risposta.append({
-            "id": o.id, "totale": o.totale, "stato_pagamento": o.stato_pagamento,
-            "acquirente": o.utente.nome if o.utente else "Sconosciuto", "email_acquirente": o.utente.email if o.utente else "Sconosciuta",
-            "articoli": [{"nome_prodotto": art.nome_prodotto, "prezzo": art.prezzo, "atleta": art.atleta, "taglia": art.taglia, "nome_personalizzato": art.nome_personalizzato} for art in o.articoli]
+            "id": o.id, 
+            "totale": o.totale, 
+            "stato_pagamento": o.stato_pagamento,
+            "pagato": o.pagato,
+            "acquirente": acquirente_nome_completo, 
+            "email_acquirente": o.utente.email if o.utente else "Sconosciuta",
+            "articoli": [{
+                "nome_prodotto": art.nome_prodotto, 
+                "prezzo": art.prezzo, 
+                "atleta": art.atleta, 
+                "taglia": art.taglia, 
+                "nome_personalizzato": art.nome_personalizzato,
+                "colore_personalizzato": art.colore_personalizzato,
+                "numero_personalizzato": art.numero_personalizzato
+            } for art in o.articoli]
         })
     return risposta
 
@@ -371,7 +413,12 @@ def admin_aggiorna_stato_ordine(ordine_id: int, payload: UpdateStatoOrdine, db: 
     ordine = db.query(Ordine).filter(Ordine.id == ordine_id).first()
     if not ordine:
         raise HTTPException(status_code=404, detail="Ordine non trovato")
-    ordine.stato_pagamento = payload.stato_pagamento
+    
+    if payload.stato_pagamento is not None:
+        ordine.stato_pagamento = payload.stato_pagamento
+    if payload.pagato is not None:
+        ordine.pagato = payload.pagato
+        
     db.commit()
     return {"messaggio": "Stato aggiornato con successo"}
 
@@ -380,12 +427,17 @@ def admin_esporta_csv(db: Session = Depends(get_db), admin_user: Utente = Depend
     articoli = db.query(ArticoloOrdine).join(Ordine).all()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["ID Ordine", "Acquirente", "Prodotto", "Taglia", "Nome Atleta", "Testo Personalizzato", "Prezzo", "Stato Pagamento"])
+    writer.writerow(["ID Ordine", "Acquirente", "Prodotto", "Taglia", "Nome Atleta", "Stampa Nome", "Colore", "Numero", "Prezzo", "Stato Operativo", "Verificato PayPal"])
     
     for art in articoli:
         ordine = art.ordine
-        acquirente = ordine.utente.nome if ordine.utente else "Sconosciuto"
-        writer.writerow([ordine.id, acquirente, art.nome_prodotto, art.taglia, art.atleta, art.nome_personalizzato or "", f"{art.prezzo:.2f}", ordine.stato_pagamento])
+        acquirente = f"{ordine.utente.nome} {ordine.utente.cognome}".strip() if ordine.utente else "Sconosciuto"
+        pagato_str = "Sì" if ordine.pagato else "No"
+        writer.writerow([
+            ordine.id, acquirente, art.nome_prodotto, art.taglia, art.atleta, 
+            art.nome_personalizzato or "", art.colore_personalizzato or "", art.numero_personalizzato or "",
+            f"{art.prezzo:.2f}", ordine.stato_pagamento, pagato_str
+        ])
         
     output.seek(0)
     return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=ordini_cnl_shop.csv"})
@@ -401,7 +453,6 @@ def admin_crea_prodotto(
 ):
     saved_file_url = None
     if file:
-        # Upload diretto dello stream del file su Cloudinary
         upload_result = cloudinary.uploader.upload(file.file, folder="cnl_shop")
         saved_file_url = upload_result.get("secure_url")
 
