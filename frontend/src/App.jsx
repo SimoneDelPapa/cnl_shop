@@ -11,7 +11,7 @@ function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
   const [atleta, setAtleta] = useState('');
   const [taglia, setTaglia] = useState('M');
   const [nomePers, setNomePers] = useState('');
-  const [colorePers, setColorePers] = useState('NERA');
+  const [colorePers, setColorePers] = useState('NESSUN COLORE DA SELEZIONARE');
   const [numeroPers, setNumeroPers] = useState('');
 
   const haPersonalizzazioni = prodotto.personalizzabile_nome || prodotto.personalizzabile_numero || prodotto.personalizzabile_colore;
@@ -26,6 +26,9 @@ function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
       ? crypto.randomUUID() 
       : Math.random().toString(36).substring(2, 15);
     
+    // Evitiamo di salvare "NESSUN COLORE DA SELEZIONARE" come vero e proprio colore se è la scelta attiva
+    const coloreScelto = colorePers === 'NESSUN COLORE DA SELEZIONARE' ? null : colorePers;
+
     onAggiungi({
       idUnivoco: safeUUID, 
       prodottoId: prodotto.id,
@@ -34,13 +37,14 @@ function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
       atleta: atleta.trim(),
       taglia: taglia,
       nomePersonalizzato: prodotto.personalizzabile_nome ? nomePers.trim() : null,
-      colorePersonalizzato: prodotto.personalizzabile_colore ? colorePers : null,
+      colorePersonalizzato: prodotto.personalizzabile_colore ? coloreScelto : null,
       numeroPersonalizzato: prodotto.personalizzabile_numero ? numeroPers.trim() : null
     });
     
     setAtleta('');
     setNomePers('');
     setNumeroPers('');
+    setColorePers('NESSUN COLORE DA SELEZIONARE');
   };
 
   return (
@@ -105,9 +109,10 @@ function ProdottoCard({ prodotto, onAggiungi, isUserAdmin }) {
                       value={colorePers} onChange={e => setColorePers(e.target.value)}
                       className="w-full bg-white/5 border border-white/20 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:ring-2 focus:ring-blue-400 [&>option]:text-slate-900 appearance-none font-bold"
                     >
-                      <option value="NERA">NERA</option>
-                      <option value="BIANCA">BIANCA</option>
-                      <option value="ROSSA">ROSSA</option>
+                      <option value="NESSUN COLORE DA SELEZIONARE">NESSUN COLORE DA SELEZIONARE</option>
+                      <option value="BIANCO">BIANCO</option>
+                      <option value="ROSSO">ROSSO</option>
+                      <option value="NERO">NERO</option>
                     </select>
                   </div>
                 )}
@@ -408,11 +413,13 @@ export default function App() {
       if (o.stato_pagamento === 'Completato') stats.completati++;
       
       stats.incassoTotale += o.totale;
-      if (o.pagato) stats.incassoVerificato += o.totale;
-
-      // Incrementa 1 euro per ciascun articolo contenuto negli ordini
-      if (o.articoli) {
-        stats.totaleArticoliVenduti += o.articoli.length;
+      
+      // Contiamo articoli e incasso solo se PAGATO
+      if (o.pagato) {
+        stats.incassoVerificato += o.totale;
+        if (o.articoli) {
+          stats.totaleArticoliVenduti += o.articoli.length;
+        }
       }
     });
 
@@ -587,7 +594,7 @@ export default function App() {
                   <div className="bg-emerald-950/40 border border-emerald-500/30 p-2.5 sm:p-4 rounded-xl text-center col-span-2 sm:col-span-1 bg-gradient-to-br from-emerald-500/10 to-teal-500/5 shadow-lg">
                     <span className="text-[10px] sm:text-xs text-emerald-300 block font-black uppercase tracking-wider">Fondo PN Lucca</span>
                     <span className="text-base sm:text-xl font-black text-emerald-400">€{statisticheAdmin.totaleArticoliVenduti.toFixed(2)}</span>
-                    <span className="text-[9px] text-emerald-200/60 block font-semibold">1€ x {statisticheAdmin.totaleArticoliVenduti} capi</span>
+                    <span className="text-[9px] text-emerald-200/60 block font-semibold">1€ x {statisticheAdmin.totaleArticoliVenduti} capi pagati</span>
                   </div>
                 </div>
 
