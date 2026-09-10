@@ -1,0 +1,26 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Consente a qualsiasi utente autenticato di leggere/scrivere i propri dati nella collezione utenti
+    match /utenti/{userId} {
+      allow read, write: if request.auth != null;
+      
+      // Permette anche l'accesso completo alla sotto-collezione delle notifiche
+      match /notifiche/{notifId} {
+        allow read, write: if request.auth != null;
+      }
+    }
+
+    // Prodotti leggibili da tutti, modificabili da utenti autenticati (admin)
+    match /prodotti/{prodottoId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+    }
+
+    // Ordini gestibili da utenti autenticati
+    match /ordini/{ordineId} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

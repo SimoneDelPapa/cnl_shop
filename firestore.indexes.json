@@ -1,0 +1,13 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "ordini",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "utente_id", "order": "ASCENDING" },
+        { "fieldPath": "creato_il", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}
