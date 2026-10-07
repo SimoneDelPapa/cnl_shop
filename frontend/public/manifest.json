@@ -1,0 +1,17 @@
+{
+  "short_name": "CNL Shop",
+  "name": "CNL Shop",
+  "icons": [
+    {
+      "src": "/cnl_shop.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#002b80",
+  "theme_color": "#002b80",
+  "display": "standalone",
+  "orientation": "portrait"
+}

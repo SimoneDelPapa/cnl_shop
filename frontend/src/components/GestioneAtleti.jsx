@@ -1,132 +1,234 @@
 import { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faUserPlus, faTrashCan, faUsers, faChevronDown, faChevronUp } from '@fortawesome/free-solid-svg-icons';
+import { 
+  faUsers, 
+  faUserPlus, 
+  faChevronDown, 
+  faChevronUp, 
+  faPenToSquare, 
+  faTrashCan, 
+  faXmark 
+} from '@fortawesome/free-solid-svg-icons';
 
 export default function GestioneAtleti({
   atleti = [],
   categorie = [],
   onAggiungiAtleta,
+  onModificaAtleta,
   onRimuoviAtleta
 }) {
   const [aperto, setAperto] = useState(false);
+  const [modalAtleta, setModalAtleta] = useState(null);
   const [nome, setNome] = useState('');
   const [cognome, setCognome] = useState('');
-  const [categoria, setCategoria] = useState(categorie[0] || 'U14');
+  const [categoria, setCategoria] = useState(categorie[0] || 'Extra');
+
+  const apriNuovo = () => {
+    setNome('');
+    setCognome('');
+    setCategoria(categorie[0] || 'Extra');
+    setModalAtleta({ isNuovo: true });
+  };
+
+  const apriModifica = (atl) => {
+    if (typeof atl === 'object') {
+      setNome(atl.nome || '');
+      setCognome(atl.cognome || '');
+      setCategoria(atl.categoria || categorie[0] || 'Extra');
+    } else {
+      const parts = String(atl).split(' ');
+      setNome(parts[0] || '');
+      setCognome(parts.slice(1).join(' ') || '');
+      setCategoria(categorie[0] || 'Extra');
+    }
+    setModalAtleta({ isNuovo: false, atletaOriginale: atl });
+  };
 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!nome.trim() || !cognome.trim()) return;
 
-    onAggiungiAtleta({
+    const atletaObj = {
       nome: nome.trim(),
       cognome: cognome.trim(),
-      categoria
-    });
+      categoria: categoria
+    };
 
-    setNome('');
-    setCognome('');
+    if (modalAtleta?.isNuovo) {
+      onAggiungiAtleta(atletaObj);
+    } else {
+      onModificaAtleta(modalAtleta.atletaOriginale, atletaObj);
+    }
+
+    setModalAtleta(null);
   };
 
   return (
-    <div className="bg-white border border-slate-200/90 rounded-2xl sm:rounded-3xl shadow-2xs overflow-hidden transition-all">
-      {/* Header fisso cliccabile per aprire/chiudere */}
-      <div 
-        onClick={() => setAperto(!aperto)}
-        className="p-4 sm:p-5 flex items-center justify-between cursor-pointer select-none hover:bg-slate-50/70 transition-colors"
-      >
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-2xl bg-blue-50 text-[#002b80] flex items-center justify-center text-sm shadow-2xs">
+    <div className="w-full space-y-2">
+      {/* BARRA ORIGINALE DA SCREENSHOT */}
+      <div className="bg-white border border-slate-200/90 rounded-3xl p-3 flex items-center justify-between shadow-xs">
+        
+        {/* Trigger a pillola per aprire la tendina dei profili */}
+        <button
+          type="button"
+          onClick={() => setAperto(!aperto)}
+          className="flex items-center gap-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200/80 rounded-2xl px-3.5 py-2 cursor-pointer transition-colors select-none"
+        >
+          <div className="w-7 h-7 rounded-xl bg-blue-50 text-[#002b80] flex items-center justify-center text-xs shrink-0">
             <FontAwesomeIcon icon={faUsers} />
           </div>
-          <div>
-            <h3 className="text-xs sm:text-sm font-black text-slate-900 leading-tight">
-              Profili Nucleo Familiare
-            </h3>
-            <p className="text-[10px] sm:text-[11px] font-semibold text-slate-400">
-              {atleti.length === 0 ? "Nessun profilo registrato" : `${atleti.length} ${atleti.length === 1 ? 'profilo configurato' : 'profili configurati'}`}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2.5">
-          <span className="text-[11px] font-extrabold text-[#002b80] bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-xl">
-            {aperto ? "Chiudi" : "Gestisci"}
+          <span className="text-sm font-black text-slate-900">Profili</span>
+          <span className="text-xs font-black text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded-lg shadow-2xs">
+            {atleti.length}
           </span>
-          <div className="w-7 h-7 rounded-xl bg-slate-100 text-slate-500 flex items-center justify-center text-xs">
-            <FontAwesomeIcon icon={aperto ? faChevronUp : faChevronDown} />
-          </div>
-        </div>
+          <FontAwesomeIcon 
+            icon={aperto ? faChevronUp : faChevronDown} 
+            className="text-xs text-slate-400 ml-0.5" 
+          />
+        </button>
+
+        {/* Tasto squadrato FontAwesome faUserPlus per aggiungere */}
+        <button
+          type="button"
+          onClick={apriNuovo}
+          className="w-11 h-11 bg-[#002b80] hover:bg-[#002060] active:scale-[0.98] text-white rounded-2xl flex items-center justify-center text-sm transition-colors cursor-pointer shadow-xs shrink-0"
+          title="Aggiungi profilo"
+        >
+          <FontAwesomeIcon icon={faUserPlus} />
+        </button>
+
       </div>
 
-      {/* Contenuto collassabile */}
+      {/* MENU A TENDINA CHE SI APRE SOTTO */}
       {aperto && (
-        <div className="p-4 sm:p-6 border-t border-slate-100 space-y-4 bg-slate-50/40 animate-in slide-in-from-top-1 duration-150">
-          <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-            <input
-              type="text"
-              placeholder="Nome"
-              value={nome}
-              onChange={e => setNome(e.target.value)}
-              required
-              className="h-10 bg-white border border-slate-200 rounded-xl px-3 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#002b80]/15 focus:border-[#002b80]"
-            />
-            <input
-              type="text"
-              placeholder="Cognome"
-              value={cognome}
-              onChange={e => setCognome(e.target.value)}
-              required
-              className="h-10 bg-white border border-slate-200 rounded-xl px-3 text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#002b80]/15 focus:border-[#002b80]"
-            />
-            <select
-              value={categoria}
-              onChange={e => setCategoria(e.target.value)}
-              className="h-10 bg-white border border-slate-200 rounded-xl px-3 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#002b80]/15 focus:border-[#002b80] cursor-pointer"
-            >
-              {categorie.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-            </select>
-            <button
-              type="submit"
-              className="h-10 bg-[#002b80] hover:bg-[#002060] active:scale-[0.99] text-white font-extrabold rounded-xl text-xs uppercase tracking-wider transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer"
-            >
-              <FontAwesomeIcon icon={faUserPlus} className="text-xs" />
-              <span>Aggiungi Profilo</span>
-            </button>
-          </form>
-
-          {atleti.length > 0 ? (
-            <div className="flex flex-wrap gap-2 pt-1">
+        <div className="bg-white border border-slate-200/90 rounded-3xl p-3.5 sm:p-4 shadow-sm space-y-2.5 animate-in slide-in-from-top-1 duration-150">
+          {atleti.length === 0 ? (
+            <p className="text-xs font-bold text-slate-400 italic py-2 text-center">
+              Nessun profilo registrato. Clicca sull'icona + per inserire il primo atleta.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {atleti.map((atl, idx) => {
-                const nomeCompleto = typeof atl === 'object' ? `${atl.nome} ${atl.cognome}` : atl;
-                const cat = typeof atl === 'object' ? atl.categoria : null;
+                const nomeVisualizzato = typeof atl === 'object' ? `${atl.nome} ${atl.cognome}`.trim() : atl;
+                const catVisualizzata = typeof atl === 'object' ? atl.categoria : 'Extra';
+
                 return (
                   <div 
                     key={idx}
-                    className="flex items-center gap-2 bg-white border border-slate-200 pl-3 pr-2 py-1 rounded-xl text-xs font-bold text-slate-800 shadow-2xs"
+                    className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-center justify-between gap-3 text-xs"
                   >
-                    <span className="truncate max-w-[160px] sm:max-w-none">{nomeCompleto}</span>
-                    {cat && (
-                      <span className="text-[10px] font-black uppercase text-[#002b80] bg-blue-50 px-1.5 py-0.5 rounded-md">
-                        {cat}
+                    <div className="min-w-0 flex-1">
+                      <strong className="font-black text-slate-900 block truncate text-sm">
+                        {nomeVisualizzato}
+                      </strong>
+                      <span className="text-[11px] font-bold text-slate-500 block mt-0.5">
+                        Categoria: <strong className="text-[#002b80] font-black">{catVisualizzata}</strong>
                       </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => onRimuoviAtleta(atl)}
-                      className="w-5 h-5 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center text-[10px] transition-colors cursor-pointer"
-                      title="Rimuovi profilo"
-                    >
-                      <FontAwesomeIcon icon={faTrashCan} />
-                    </button>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => apriModifica(atl)}
+                        className="w-8 h-8 rounded-xl bg-white hover:bg-blue-50 text-[#002b80] border border-slate-200 flex items-center justify-center transition-colors cursor-pointer shadow-2xs"
+                        title="Modifica Profilo"
+                      >
+                        <FontAwesomeIcon icon={faPenToSquare} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onRimuoviAtleta(atl)}
+                        className="w-8 h-8 rounded-xl bg-white hover:bg-red-50 text-red-600 border border-slate-200 flex items-center justify-center transition-colors cursor-pointer shadow-2xs"
+                        title="Elimina Profilo"
+                      >
+                        <FontAwesomeIcon icon={faTrashCan} />
+                      </button>
+                    </div>
                   </div>
                 );
               })}
             </div>
-          ) : (
-            <p className="text-[11px] text-slate-400 italic">
-              Nessun profilo registrato. Inserisci i dati sopra per associare comodamente i capi da ordinare.
-            </p>
           )}
+        </div>
+      )}
+
+      {/* POPUP MODALE NUOVO / MODIFICA PROFILO */}
+      {modalAtleta && (
+        <div 
+          className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/75 backdrop-blur-sm p-4 animate-in fade-in duration-150 overflow-y-auto"
+          onClick={() => setModalAtleta(null)}
+        >
+          <div 
+            className="relative w-full max-w-sm bg-white rounded-3xl p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[90dvh] flex flex-col my-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-3.5 shrink-0">
+              <h4 className="text-base font-black text-slate-900 leading-tight">
+                {modalAtleta.isNuovo ? "Nuovo Profilo Atleta" : "Modifica Profilo"}
+              </h4>
+              <button 
+                type="button"
+                onClick={() => setModalAtleta(null)}
+                className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center text-xs transition-colors cursor-pointer"
+              >
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto pr-1 space-y-3">
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-600 block mb-1">
+                  Nome
+                </label>
+                <input 
+                  type="text" 
+                  required 
+                  value={nome} 
+                  onChange={e => setNome(e.target.value)}
+                  placeholder="Es. Mario"
+                  className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-sm font-bold text-slate-900 focus:outline-none focus:border-[#002b80]"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-600 block mb-1">
+                  Cognome
+                </label>
+                <input 
+                  type="text" 
+                  required 
+                  value={cognome} 
+                  onChange={e => setCognome(e.target.value)}
+                  placeholder="Es. Rossi"
+                  className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-sm font-bold text-slate-900 focus:outline-none focus:border-[#002b80]"
+                />
+              </div>
+
+              <div>
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-600 block mb-1">
+                  Categoria / Squadra
+                </label>
+                <select 
+                  value={categoria} 
+                  onChange={e => setCategoria(e.target.value)}
+                  className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-sm font-bold text-slate-800 focus:outline-none focus:border-[#002b80] cursor-pointer"
+                >
+                  {categorie.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="pt-3.5 mt-3 border-t border-slate-100 shrink-0">
+                <button
+                  type="submit"
+                  className="w-full h-12 bg-[#002b80] hover:bg-[#002060] active:scale-[0.99] text-white font-black rounded-2xl text-xs sm:text-sm uppercase tracking-wider transition-all shadow-md flex items-center justify-center cursor-pointer text-center"
+                >
+                  {modalAtleta.isNuovo ? "Aggiungi Profilo" : "Salva Profilo"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

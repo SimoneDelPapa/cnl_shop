@@ -1,12 +1,34 @@
 <!doctype html>
-<html lang="en">
+<html lang="it">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/pn_lucca.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta 
+      name="viewport" 
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" 
+    />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>CNL Shop</title>
+    
+    <!-- PWA Web App Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Unico PNG per iOS (Home Screen / Standalone) -->
+    <link rel="apple-touch-icon" href="/cnl_shop.png" />
+
+    <!-- Unico PNG per Favicon Browser e Desktop -->
+    <link rel="icon" type="image/png" href="/cnl_shop.png" />
+    <link rel="shortcut icon" href="/cnl_shop.png" />
+
+    <!-- Modalità App Standalone per iOS -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="CNL Shop" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+
+    <meta name="theme-color" content="#002b80" />
+    <meta name="msapplication-TileColor" content="#002b80" />
   </head>
-  <body>
+  <body class="bg-slate-50 antialiased select-none">
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>

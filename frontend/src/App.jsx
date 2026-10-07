@@ -6,48 +6,50 @@ import PannelloAdmin from './components/PannelloAdmin';
 import LightboxModal from './components/LightboxModal';
 import ModalModificaOrdine from './components/ModalModificaOrdine';
 import ModalProfilo from './components/ModalProfilo';
+import ModalCarrello from './components/ModalCarrello';
+import ModalGuidaPrimoAccesso from './components/ModalGuidaPrimoAccesso';
 import CustomModal from './components/CustomModal';
 import BannerNotifiche from './components/BannerNotifiche';
+import ToastNotification from './components/ToastNotification';
+import XLSX from 'xlsx-js-style';
 
-// Firebase SDK
 import { auth, db } from './firebase';
 import { onAuthStateChanged, signOut, deleteUser } from 'firebase/auth';
 import { 
   collection, 
   doc, 
-  addDoc, 
+  getDoc,
+  getDocs, 
+  setDoc, 
   updateDoc, 
   deleteDoc, 
   onSnapshot, 
   query, 
   where, 
   orderBy, 
-  serverTimestamp,
-  arrayUnion,
-  arrayRemove,
+  serverTimestamp, 
+  arrayUnion, 
   writeBatch
 } from 'firebase/firestore';
 
+// NUOVI LINK PAYPAL AGGIORNATI E SALVATI
 const PAYPAL_LINKS = {
-  pallanuoto: "https://paypal.me/pallanuotolucca?country.x=IT&locale.x=it_IT",
-  nuoto: "https://paypal.me/circolonuotolucca?country.x=IT&locale.x=it_IT"
+  pallanuoto: "https://paypal.me/PallanuotoLucca",
+  nuoto: "https://www.paypal.me/CircoloNuotoLucca"
 };
 
-const CATEGORIE_ATLETI = [
-  "Maschile",
-  "Femminile",
-  "U18",
-  "U16",
-  "U14",
-  "U12",
-  "Extra"
+const CATEGORIE_PALLANUOTO = [
+  "Maschile", "Femminile", "U18", "U16", "U14", "U12", "Baby", "Extra"
+];
+
+const CATEGORIE_NUOTO = [
+  "Categoria", "Esordienti A", "Esordienti B", "Esordienti C", "Propaganda Grandi", "Propaganda Esordienti", "Extra"
 ];
 
 export default function App() {
   const [utenteLoggato, setUtenteLoggato] = useState(null);
   const [authError, setAuthError] = useState(null);
   const [prodotti, setProdotti] = useState([]);
-  const [carrello, setCarrello] = useState([]);
   const [ordiniUtente, setOrdiniUtente] = useState([]);
   const [tuttiGliOrdiniAdmin, setTuttiGliOrdiniAdmin] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -57,26 +59,27 @@ export default function App() {
   const [ordineInModifica, setOrdineInModifica] = useState(null);
   const [notificheUtente, setNotificheUtente] = useState([]);
   const [mostraModalProfilo, setMostraModalProfilo] = useState(false);
+  const [mostraModalCarrello, setMostraModalCarrello] = useState(false);
+  const [mostraGuidaPrimoAccesso, setMostraGuidaPrimoAccesso] = useState(false);
+
+  const [settoreScelto, setSettoreScelto] = useState(() => {
+    return sessionStorage.getItem("cnl_settore_richiesto") || 'pallanuoto';
+  });
+
+  const [toast, setToast] = useState(null);
+  const mostraMessaggio = useCallback((titolo, messaggio, tipo = 'success') => {
+    setToast({ titolo, messaggio, tipo });
+  }, []);
 
   const [modalConfig, setModalConfig] = useState({
     isOpen: false,
-    tipo: 'info',
+    tipo: 'warning',
     titolo: '',
     messaggio: '',
     onConferma: null,
     testoConferma: 'Conferma',
     testoAnnulla: 'Annulla'
   });
-
-  const mostraMessaggio = useCallback((titolo, messaggio, tipo = 'success') => {
-    setModalConfig({
-      isOpen: true,
-      tipo,
-      titolo,
-      messaggio,
-      onConferma: null
-    });
-  }, []);
 
   const chiediConferma = useCallback((titolo, messaggio, callbackConferma, testoConferma = "Procedi") => {
     setModalConfig({
@@ -89,9 +92,9 @@ export default function App() {
     });
   }, []);
 
-  const [adminTab, setAdminTab] = useState(() => {
-    return localStorage.getItem("cnl_admin_tab") || 'ordini';
-  });
+  const [adminTab, setAdminTab] = useState('ordini');
+  const [filtroStatoAdmin, setFiltroStatoAdmin] = useState('Tutti');
+  const [ricercaAdmin, setRicercaAdmin] = useState('');
 
   const [nuovoProd, setNuovoProd] = useState({ 
     nome: '', 
@@ -107,71 +110,126 @@ export default function App() {
   const [uploadingImage, setUploadingImage] = useState(false);
   const fileInputRef = useRef(null);
 
-  const [ricercaAdmin, setRicercaAdmin] = useState('');
-  const [filtroStatoAdmin, setFiltroStatoAdmin] = useState('Tutti');
+  const adminRuolo = useMemo(() => {
+    const r = (utenteLoggato?.isAdmin || "").toLowerCase();
+    return (r === "pallanuoto" || r === "nuoto") ? r : null;
+  }, [utenteLoggato]);
 
-  const settoreUtente = utenteLoggato?.settore || 'pallanuoto';
-  const linkPaypalSettore = PAYPAL_LINKS[settoreUtente] || PAYPAL_LINKS.pallanuoto;
+  const settoreAttivo = adminRuolo || settoreScelto;
+
+  const cambiaSettore = useCallback((nuovoSettore) => {
+    if (adminRuolo) return;
+    setSettoreScelto(nuovoSettore);
+    sessionStorage.setItem("cnl_settore_richiesto", nuovoSettore);
+    
+    // Riporta istantaneamente lo scroll in alto senza ricaricare la pagina
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, [adminRuolo]);
+
+  const linkPaypalSettore = PAYPAL_LINKS[settoreAttivo] || PAYPAL_LINKS.pallanuoto;
+  const categorieCorrenti = useMemo(() => {
+    return settoreAttivo === 'nuoto' ? CATEGORIE_NUOTO : CATEGORIE_PALLANUOTO;
+  }, [settoreAttivo]);
+
+  const isUserAdminNelSettore = useMemo(() => {
+    return Boolean(adminRuolo && adminRuolo === settoreAttivo);
+  }, [adminRuolo, settoreAttivo]);
+
+  const carrello = useMemo(() => {
+    if (!utenteLoggato) return [];
+    if (settoreAttivo === 'nuoto') {
+      return Array.isArray(utenteLoggato.carrello_nuoto) ? utenteLoggato.carrello_nuoto : [];
+    }
+    return Array.isArray(utenteLoggato.carrello_pallanuoto) 
+      ? utenteLoggato.carrello_pallanuoto 
+      : (Array.isArray(utenteLoggato.carrello) ? utenteLoggato.carrello : []);
+  }, [utenteLoggato, settoreAttivo]);
+
+  const atletiSettoreAttivo = useMemo(() => {
+    if (!utenteLoggato) return [];
+    if (settoreAttivo === 'nuoto') {
+      return Array.isArray(utenteLoggato.atleti_nuoto) ? utenteLoggato.atleti_nuoto : [];
+    }
+    return Array.isArray(utenteLoggato.atleti_pallanuoto) 
+      ? utenteLoggato.atleti_pallanuoto 
+      : (Array.isArray(utenteLoggato.atleti) ? utenteLoggato.atleti : []);
+  }, [utenteLoggato, settoreAttivo]);
+
+  // CONTROLLO ATTIVAZIONE GUIDA PRIMO ACCESSO (Asincrono per evitare render a cascata)
+  useEffect(() => {
+    if (!loading && utenteLoggato && !isUserAdminNelSettore) {
+      const userId = utenteLoggato.id || utenteLoggato.auth_uid;
+      const giaVista = localStorage.getItem(`cnl_guida_vista_${userId}`);
+
+      if (!giaVista && atletiSettoreAttivo.length === 0) {
+        const timer = setTimeout(() => {
+          setMostraGuidaPrimoAccesso(true);
+        }, 0);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [utenteLoggato, loading, isUserAdminNelSettore, atletiSettoreAttivo]);
+
+  const chiudiGuidaPrimoAccesso = useCallback(() => {
+    if (utenteLoggato) {
+      const userId = utenteLoggato.id || utenteLoggato.auth_uid;
+      localStorage.setItem(`cnl_guida_vista_${userId}`, 'true');
+    }
+    setMostraGuidaPrimoAccesso(false);
+  }, [utenteLoggato]);
+
+  // SCROLL-LOCK SENZA POSIZIONAMENTO FISSO DEL BODY (NON ROMPE LA NAVBAR)
+  const isQualcheModalAperto = Boolean(
+    mostraModalCarrello || 
+    mostraGuidaPrimoAccesso || 
+    mostraModalProfilo || 
+    zoomImage || 
+    ordineInModifica || 
+    modalConfig.isOpen
+  );
 
   useEffect(() => {
-    localStorage.setItem("cnl_admin_tab", adminTab);
-  }, [adminTab]);
+    if (!isQualcheModalAperto) return;
 
-  // Sincronizzazione Autenticazione con supporto chiavi composite per email condivise tra settori
+    const originalHtmlOverflow = document.documentElement.style.overflow;
+    const originalBodyOverflow = document.body.style.overflow;
+
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+
+    return () => {
+      document.documentElement.style.overflow = originalHtmlOverflow;
+      document.body.style.overflow = originalBodyOverflow;
+    };
+  }, [isQualcheModalAperto]);
+
   useEffect(() => {
     let unsubscribeDoc = null;
-
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
       if (user) {
-        const settoreRichiesto = sessionStorage.getItem("cnl_settore_richiesto") || 'pallanuoto';
-        const compositeKey = `${user.uid}_${settoreRichiesto}`;
-        const userDocRef = doc(db, "utenti", compositeKey);
-        
+        const userDocRef = doc(db, "utenti", user.uid);
         unsubscribeDoc = onSnapshot(userDocRef, (userSnap) => {
           if (userSnap.exists()) {
             const data = userSnap.data();
             setAuthError(null);
             setUtenteLoggato({
-              id: compositeKey,
+              id: user.uid,
               auth_uid: user.uid,
               email: user.email,
-              atleti: Array.isArray(data.atleti) ? data.atleti : [],
-              ...data,
-              settore: data.settore || settoreRichiesto
+              isAdmin: data.isAdmin || (data.is_admin ? (data.settore || "pallanuoto") : "no"),
+              ...data
             });
             setLoading(false);
           } else {
-            // Tentativo fallback per vecchi account legacy
-            const legacyRef = doc(db, "utenti", user.uid);
-            onSnapshot(legacyRef, (legSnap) => {
-              if (legSnap.exists() && legSnap.data().settore === settoreRichiesto) {
-                const legData = legSnap.data();
-                setAuthError(null);
-                setUtenteLoggato({
-                  id: user.uid,
-                  auth_uid: user.uid,
-                  email: user.email,
-                  atleti: Array.isArray(legData.atleti) ? legData.atleti : [],
-                  ...legData,
-                  settore: legData.settore
-                });
-              } else {
-                setUtenteLoggato(null);
-              }
-              setLoading(false);
-            });
+            setUtenteLoggato(null);
+            setLoading(false);
           }
-        }, (err) => {
-          console.error("Errore snapshot utente:", err);
-          setLoading(false);
-        });
-
+        }, () => setLoading(false));
       } else {
         if (unsubscribeDoc) unsubscribeDoc();
         setUtenteLoggato(null);
         setOrdiniUtente([]);
         setTuttiGliOrdiniAdmin([]);
-        setCarrello([]);
         setNotificheUtente([]);
         setLoading(false);
       }
@@ -183,31 +241,97 @@ export default function App() {
     };
   }, []);
 
+  const handleLogout = useCallback(async () => {
+    try {
+      setAdminTab('ordini');
+      setFiltroStatoAdmin('Tutti');
+      setRicercaAdmin('');
+      setSettoreScelto('pallanuoto');
+      sessionStorage.removeItem("cnl_settore_richiesto");
+      sessionStorage.removeItem("cnl_admin_tab");
+      setMostraModalCarrello(false);
+      setMostraModalProfilo(false);
+      setOrdineInModifica(null);
+      await signOut(auth);
+    } catch (err) {
+      console.error("Errore logout:", err);
+    }
+  }, []);
+
   const aggiornaProfilo = async (nuoviDati) => {
     if (!utenteLoggato) return;
     try {
       await updateDoc(doc(db, "utenti", utenteLoggato.id), nuoviDati);
-      mostraMessaggio("Profilo Aggiornato", "I tuoi dati sono stati aggiornati con successo.", "success");
+      mostraMessaggio("Profilo Aggiornato", "I tuoi dati sono stati salvati.", "success");
     } catch (err) {
-      mostraMessaggio("Errore", "Impossibile aggiornare il profilo: " + err.message, "error");
+      mostraMessaggio("Errore: " + err.message, "error");
     }
   };
 
-  const cancellaAccount = () => {
+  const cancellaAccount = async () => {
     if (!utenteLoggato) return;
+    try {
+      const qOrdiniUtente = query(
+        collection(db, "ordini"),
+        where("email_acquirente", "==", utenteLoggato.email)
+      );
+      const snapOrdini = await getDocs(qOrdiniUtente);
+      let debitoTotale = 0;
+      let capiNonSaldati = 0;
+
+      snapOrdini.forEach(docSnap => {
+        const ord = docSnap.data();
+        if (ord.stato_pagamento === "Annullato") return;
+        if (!ord.pagato) {
+          const listaCapi = Array.isArray(ord.articoli) && ord.articoli.length > 0 ? ord.articoli : [ord];
+          listaCapi.forEach(capo => {
+            debitoTotale += Number(capo.prezzo || ord.prezzo || ord.totale || 0);
+            capiNonSaldati++;
+          });
+        }
+      });
+
+      if (capiNonSaldati > 0 || debitoTotale > 0) {
+        mostraMessaggio(
+          "Cancellazione non consentita",
+          `Impossibile eliminare l'account: risultano ${capiNonSaldati} articoli non saldati per un totale di €${debitoTotale.toFixed(2)}.`,
+          "warning"
+        );
+        return;
+      }
+
+      if (utenteLoggato.isAdmin && utenteLoggato.isAdmin !== "no") {
+        const qOrdiniAdminSettore = query(
+          collection(db, "ordini"),
+          where("disciplina", "==", utenteLoggato.isAdmin),
+          where("stato_pagamento", "in", ["In attesa", "In lavorazione"])
+        );
+        const snapAdmin = await getDocs(qOrdiniAdminSettore);
+        if (!snapAdmin.empty) {
+          mostraMessaggio(
+            "Cancellazione Admin Negata",
+            `Impossibile eliminare l'account amministratore: risultano ${snapAdmin.size} ordini pendenti/in lavorazione nel settore ${utenteLoggato.isAdmin.toUpperCase()}.`,
+            "warning"
+          );
+          return;
+        }
+      }
+    } catch {
+      mostraMessaggio("Errore", "Impossibile verificare lo stato degli ordini. Riprova più tardi.", "error");
+      return;
+    }
+
     chiediConferma(
-      "CANCELLAZIONE DEFINITIVA",
-      "Attenzione: stai per eliminare definitivamente il tuo account per questo settore. L'operazione NON è reversibile. Confermi di voler procedere?",
+      "CANCELLAZIONE ACCOUNT",
+      "Confermi l'eliminazione definitiva del tuo account e di tutti i profili associati? Questa operazione è irreversibile.",
       async () => {
         try {
           const user = auth.currentUser;
           await deleteDoc(doc(db, "utenti", utenteLoggato.id));
-          if (user) {
-            await deleteUser(user).catch(() => {});
-          }
-          mostraMessaggio("Account Eliminato", "Il tuo account è stato cancellato con successo.", "info");
+          if (user) await deleteUser(user).catch(() => {});
+          mostraMessaggio("Account Eliminato", "L'account e tutti i dati associati sono stati rimossi.", "info");
         } catch (err) {
-          mostraMessaggio("Errore Cancellazione", "Errore: " + err.message, "error");
+          mostraMessaggio("Errore: " + err.message, "error");
         }
       },
       "Elimina Definitivamente"
@@ -215,7 +339,7 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!utenteLoggato || utenteLoggato.is_admin) return;
+    if (!utenteLoggato || isUserAdminNelSettore) return;
     const qNotif = query(
       collection(db, "utenti", utenteLoggato.id, "notifiche"),
       orderBy("creato_il", "desc")
@@ -225,20 +349,36 @@ export default function App() {
     }, (err) => console.error("Errore notifiche:", err));
 
     return () => unsubscribe();
-  }, [utenteLoggato]);
+  }, [utenteLoggato, isUserAdminNelSettore]);
 
-  const eliminaNotificaUtente = useCallback(async (notificaId) => {
-    if (!utenteLoggato) return;
-    try {
-      await deleteDoc(doc(db, "utenti", utenteLoggato.id, "notifiche", notificaId));
-    } catch (err) {
-      console.error("Errore cancellazione notifica:", err);
-    }
-  }, [utenteLoggato]);
+  const sollecitiPerSettore = useMemo(() => {
+    const stato = { pallanuoto: false, nuoto: false };
+    notificheUtente.forEach(n => {
+      if (n.tipo === 'sollecito' || Boolean(n.linkPaypal)) {
+        const disc = (n.disciplina || 'pallanuoto').toLowerCase();
+        if (disc === 'pallanuoto') stato.pallanuoto = true;
+        if (disc === 'nuoto') stato.nuoto = true;
+      }
+    });
+    return stato;
+  }, [notificheUtente]);
+
+  const notificheSettoreCorrente = useMemo(() => {
+    return notificheUtente.filter(n => {
+      if (n.tipo === 'sollecito' || Boolean(n.linkPaypal)) {
+        return (n.disciplina || 'pallanuoto').toLowerCase() === settoreAttivo.toLowerCase();
+      }
+      return true;
+    });
+  }, [notificheUtente, settoreAttivo]);
 
   useEffect(() => {
-    if (!utenteLoggato || utenteLoggato.is_admin) return;
-    const q = query(collection(db, "ordini"), where("utente_id", "==", utenteLoggato.id));
+    if (!utenteLoggato || isUserAdminNelSettore) return;
+    const q = query(
+      collection(db, "ordini"), 
+      where("email_acquirente", "==", utenteLoggato.email),
+      where("disciplina", "==", settoreAttivo)
+    );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const ords = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       ords.sort((a, b) => {
@@ -250,11 +390,11 @@ export default function App() {
     }, (err) => console.error("Errore ordini utente:", err));
 
     return () => unsubscribe();
-  }, [utenteLoggato]);
+  }, [utenteLoggato, isUserAdminNelSettore, settoreAttivo]);
 
   useEffect(() => {
-    if (!utenteLoggato || !utenteLoggato.is_admin) return;
-    const q = query(collection(db, "ordini"), where("disciplina", "==", settoreUtente));
+    if (!utenteLoggato || !isUserAdminNelSettore) return;
+    const q = query(collection(db, "ordini"), where("disciplina", "==", settoreAttivo));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const ords = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
       ords.sort((a, b) => {
@@ -266,7 +406,7 @@ export default function App() {
     }, (err) => console.error("Errore ordini admin:", err));
 
     return () => unsubscribe();
-  }, [utenteLoggato, settoreUtente]);
+  }, [utenteLoggato, isUserAdminNelSettore, settoreAttivo]);
 
   useEffect(() => {
     if (!utenteLoggato) return;
@@ -274,49 +414,205 @@ export default function App() {
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const prods = snapshot.docs
         .map(d => ({ id: d.id, ...d.data() }))
-        .filter(p => p.disciplina === settoreUtente || p.disciplina === 'entrambi');
+        .filter(p => p.disciplina === settoreAttivo || p.disciplina === 'entrambi');
       setProdotti(prods);
     }, (error) => console.error("Errore prodotti:", error));
 
     return () => unsubscribe();
-  }, [utenteLoggato, settoreUtente]);
+  }, [utenteLoggato, settoreAttivo]);
 
   const aggiungiAtletaFamiglia = async (nuovoAtleta) => {
-    if (!utenteLoggato || utenteLoggato.is_admin) return;
+    if (!utenteLoggato) return;
+    const campoAtleti = settoreAttivo === 'nuoto' ? "atleti_nuoto" : "atleti_pallanuoto";
+
     try {
       const userRef = doc(db, "utenti", utenteLoggato.id);
       await updateDoc(userRef, {
-        atleti: arrayUnion(nuovoAtleta)
+        [campoAtleti]: arrayUnion(nuovoAtleta)
       });
-      mostraMessaggio("Successo", "Profilo aggiunto correttamente al nucleo familiare.", "success");
+      mostraMessaggio("Profilo Aggiunto", `Profilo registrato per ${settoreAttivo.toUpperCase()}.`, "success");
+      setMostraGuidaPrimoAccesso(false);
     } catch (err) {
-      mostraMessaggio("Errore", "Errore aggiunta profilo: " + err.message, "error");
+      mostraMessaggio("Errore: " + err.message, "error");
     }
   };
 
-  const rimuoviAtletaFamiglia = async (atletaDaRimuovere) => {
-    if (!utenteLoggato || utenteLoggato.is_admin) return;
+  const modificaAtletaFamiglia = useCallback(async (vecchioAtleta, nuoviDati) => {
+    if (!utenteLoggato) return;
+    const campoAtleti = settoreAttivo === 'nuoto' ? "atleti_nuoto" : "atleti_pallanuoto";
+    const campoCarrello = settoreAttivo === 'nuoto' ? "carrello_nuoto" : "carrello_pallanuoto";
+
+    const vecchioNome = typeof vecchioAtleta === 'object'
+      ? `${vecchioAtleta.nome || ''} ${vecchioAtleta.cognome || ''}`.trim()
+      : String(vecchioAtleta).trim();
+
+    const nuovoNome = `${nuoviDati.nome} ${nuoviDati.cognome}`.trim();
+
+    try {
+      const userRef = doc(db, "utenti", utenteLoggato.id);
+      const listaAtletiVecchia = settoreAttivo === 'nuoto'
+        ? (utenteLoggato.atleti_nuoto || [])
+        : (utenteLoggato.atleti_pallanuoto || utenteLoggato.atleti || []);
+
+      const nuovaListaAtleti = listaAtletiVecchia.map(a => {
+        const n = typeof a === 'object' ? `${a.nome || ''} ${a.cognome || ''}`.trim() : String(a).trim();
+        if (n.toLowerCase() === vecchioNome.toLowerCase()) {
+          return { ...nuoviDati };
+        }
+        return a;
+      });
+
+      const carrelloAttuale = carrello.map(item => {
+        if ((item.atleta || '').toLowerCase() === vecchioNome.toLowerCase()) {
+          return {
+            ...item,
+            atleta: nuovoNome,
+            categoria: nuoviDati.categoria
+          };
+        }
+        return item;
+      });
+
+      await updateDoc(userRef, {
+        [campoAtleti]: nuovaListaAtleti,
+        [campoCarrello]: carrelloAttuale
+      });
+
+      const ordiniDaAggiornare = ordiniUtente.filter(o => o.stato_pagamento === "In attesa");
+      if (ordiniDaAggiornare.length > 0) {
+        const batch = writeBatch(db);
+        let count = 0;
+
+        ordiniDaAggiornare.forEach(ord => {
+          let modificato = false;
+          let articoliAgg = ord.articoli || [];
+
+          if (articoliAgg.length > 0) {
+            articoliAgg = articoliAgg.map(art => {
+              if ((art.atleta || '').toLowerCase() === vecchioNome.toLowerCase()) {
+                modificato = true;
+                return { ...art, atleta: nuovoNome, categoria: nuoviDati.categoria };
+              }
+              return art;
+            });
+          } else if ((ord.atleta || '').toLowerCase() === vecchioNome.toLowerCase()) {
+            modificato = true;
+          }
+
+          if (modificato) {
+            count++;
+            batch.update(doc(db, "ordini", ord.id), {
+              atleta: nuovoNome,
+              categoria: nuoviDati.categoria,
+              articoli: articoliAgg,
+              aggiornato_il: serverTimestamp()
+            });
+          }
+        });
+
+        if (count > 0) await batch.commit();
+      }
+
+      mostraMessaggio("Profilo Aggiornato", `Dati aggiornati per ${nuovoNome}.`, "success");
+    } catch (err) {
+      mostraMessaggio("Errore: " + err.message, "error");
+    }
+  }, [utenteLoggato, settoreAttivo, carrello, ordiniUtente, mostraMessaggio]);
+
+  const rimuoviAtletaFamiglia = useCallback(async (atletaDaRimuovere) => {
+    if (!utenteLoggato) return;
+    const campoAtleti = settoreAttivo === 'nuoto' ? "atleti_nuoto" : "atleti_pallanuoto";
+    
     const nomeVisualizzato = typeof atletaDaRimuovere === 'object' 
-      ? `${atletaDaRimuovere.nome} ${atletaDaRimuovere.cognome}` 
-      : atletaDaRimuovere;
+      ? `${atletaDaRimuovere.nome || ''} ${atletaDaRimuovere.cognome || ''}`.trim() 
+      : String(atletaDaRimuovere).trim();
+
+    const categoriaTarget = typeof atletaDaRimuovere === 'object' ? (atletaDaRimuovere.categoria || '').trim().toLowerCase() : '';
+
+    const pulisciNome = (str) => {
+      if (!str) return '';
+      return String(str).replace(/\(.*?\)/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+    };
+
+    const targetPulito = pulisciNome(nomeVisualizzato);
+
+    const capiNelCarrello = carrello.filter(item => {
+      const nomeCart = pulisciNome(item.atleta || '');
+      return nomeCart === targetPulito;
+    });
+
+    if (capiNelCarrello.length > 0) {
+      mostraMessaggio(
+        "Capo nel Carrello", 
+        `Rimuovi prima dal carrello gli articoli di ${settoreAttivo.toUpperCase()} intestati a "${nomeVisualizzato}".`, 
+        "warning"
+      );
+      return;
+    }
+
+    try {
+      const qVerifica = query(
+        collection(db, "ordini"), 
+        where("email_acquirente", "==", utenteLoggato.email),
+        where("disciplina", "==", settoreAttivo)
+      );
+      const snapOrdini = await getDocs(qVerifica);
+      let haOrdiniAttivi = false;
+      let numeroCapiTrovati = 0;
+
+      snapOrdini.forEach(docSnap => {
+        const ord = docSnap.data();
+        if (ord.stato_pagamento === "Annullato") return;
+
+        const listaCapi = Array.isArray(ord.articoli) && ord.articoli.length > 0 ? ord.articoli : [ord];
+        listaCapi.forEach(capo => {
+          const nomeCapo = pulisciNome(capo.atleta || ord.atleta || '');
+          if (nomeCapo && nomeCapo === targetPulito) {
+            haOrdiniAttivi = true;
+            numeroCapiTrovati++;
+          }
+        });
+      });
+
+      if (haOrdiniAttivi) {
+        mostraMessaggio(
+          "Eliminazione non consentita", 
+          `Impossibile eliminare "${nomeVisualizzato}": ci sono ${numeroCapiTrovati} capi ordinati a suo nome per ${settoreAttivo.toUpperCase()}. Elimina o annulla prima gli ordini pendenti.`, 
+          "warning"
+        );
+        return;
+      }
+    } catch (err) {
+      console.error("Errore verifica ordini profilo:", err);
+    }
 
     chiediConferma(
       "Elimina Profilo",
-      `Vuoi rimuovere il profilo di ${nomeVisualizzato}?`,
+      `Confermi l'eliminazione definitiva del profilo "${nomeVisualizzato}" dal settore ${settoreAttivo.toUpperCase()}?`,
       async () => {
         try {
           const userRef = doc(db, "utenti", utenteLoggato.id);
-          await updateDoc(userRef, {
-            atleti: arrayRemove(atletaDaRimuovere)
+          const listaAttuale = settoreAttivo === 'nuoto' 
+            ? (utenteLoggato.atleti_nuoto || []) 
+            : (utenteLoggato.atleti_pallanuoto || utenteLoggato.atleti || []);
+
+          const nuovaLista = listaAttuale.filter(a => {
+            const n = typeof a === 'object' ? `${a.nome || ''} ${a.cognome || ''}`.trim() : String(a).trim();
+            const cat = typeof a === 'object' ? (a.categoria || '').trim().toLowerCase() : '';
+            const matchNome = pulisciNome(n) === targetPulito;
+            const matchCat = categoriaTarget ? cat === categoriaTarget : true;
+            return !(matchNome && matchCat);
           });
-          mostraMessaggio("Rimosso", "Profilo eliminato con successo.", "success");
+
+          await updateDoc(userRef, { [campoAtleti]: nuovaLista });
+          mostraMessaggio("Profilo Rimosso", `Il profilo di ${nomeVisualizzato} è stato rimosso da ${settoreAttivo.toUpperCase()}.`, "info");
         } catch (err) {
-          mostraMessaggio("Errore", "Errore rimozione profilo: " + err.message, "error");
+          mostraMessaggio("Errore: " + err.message, "error");
         }
       },
       "Elimina"
     );
-  };
+  }, [utenteLoggato, settoreAttivo, carrello, chiediConferma, mostraMessaggio]);
 
   const caricaImmagineSuCloudinary = async (file) => {
     const CLOUD_NAME = "vygiohsj";
@@ -360,16 +656,17 @@ export default function App() {
       if (fileImmagine) {
         imageUrl = await caricaImmagineSuCloudinary(fileImmagine);
       }
-      await addDoc(collection(db, "prodotti"), {
+      const batchRef = collection(db, "prodotti");
+      await setDoc(doc(batchRef), {
         nome: nuovoProd.nome.trim(),
         prezzo: parseFloat(nuovoProd.prezzo) || 0,
-        disciplina: settoreUtente,
+        disciplina: settoreAttivo,
         immagine_url: imageUrl,
         attivo: true,
         taglia_unica: Boolean(nuovoProd.taglia_unica),
         personalizzabile_nome: Boolean(nuovoProd.personalizzabile_nome),
-        personalizzabile_numero: Boolean(nuovoProd.personalizzabile_numero),
-        personalizzabile_colore: Boolean(nuovoProd.personalizzabile_colore),
+        personalizzabile_numero: settoreAttivo === 'nuoto' ? false : Boolean(nuovoProd.personalizzabile_numero),
+        personalizzabile_colore: settoreAttivo === 'nuoto' ? false : Boolean(nuovoProd.personalizzabile_colore),
         creato_il: serverTimestamp()
       });
       setNuovoProd({ 
@@ -377,13 +674,13 @@ export default function App() {
         personalizzabile_nome: false, personalizzabile_numero: false, personalizzabile_colore: false
       });
       rimuoviFileSelezionato();
-      mostraMessaggio("Pubblicato", "Articolo pubblicato con successo nel catalogo!", "success");
+      mostraMessaggio("Capo Creato", "Articolo pubblicato con successo nel catalogo.", "success");
     } catch (err) {
-      mostraMessaggio("Errore", "Errore: " + err.message, "error");
+      mostraMessaggio("Errore: " + err.message, "error");
     } finally {
       setUploadingImage(false);
     }
-  }, [nuovoProd, fileImmagine, settoreUtente, mostraMessaggio]);
+  }, [nuovoProd, fileImmagine, settoreAttivo, mostraMessaggio]);
 
   const modificaProdottoAdmin = useCallback(async (prodottoId, datiAggiornati) => {
     try {
@@ -391,544 +688,420 @@ export default function App() {
         ...datiAggiornati,
         aggiornato_il: serverTimestamp()
       });
-      mostraMessaggio("Aggiornato", "Articolo aggiornato con successo!", "success");
+      mostraMessaggio("Aggiornato", "Articolo modificato con successo.", "success");
     } catch (err) {
-      mostraMessaggio("Errore", "Errore aggiornamento articolo: " + err.message, "error");
+      mostraMessaggio("Errore: " + err.message, "error");
     }
   }, [mostraMessaggio]);
 
   const toggleVisibilitaProdottoAdmin = useCallback(async (prodottoId, nuovoStato) => {
     try {
-      await updateDoc(doc(db, "prodotti", prodottoId), {
-        attivo: nuovoStato
-      });
+      await updateDoc(doc(db, "prodotti", prodottoId), { attivo: nuovoStato });
     } catch (err) {
-      mostraMessaggio("Errore", "Errore cambio visibilità: " + err.message, "error");
+      mostraMessaggio("Errore: " + err.message, "error");
     }
   }, [mostraMessaggio]);
 
   const eliminaProdottoAdmin = useCallback(async (id) => {
+    const prodDaEliminare = prodotti.find(p => p.id === id);
+    const nomeProdTarget = (prodDaEliminare?.nome || '').trim().toLowerCase();
+
+    try {
+      const qOrdini = query(
+        collection(db, "ordini"),
+        where("disciplina", "==", settoreAttivo)
+      );
+      const snapOrdini = await getDocs(qOrdini);
+      let ordiniTrovati = 0;
+
+      snapOrdini.forEach(docSnap => {
+        const ord = docSnap.data();
+        if (ord.stato_pagamento === "Annullato") return;
+
+        const listaCapi = Array.isArray(ord.articoli) && ord.articoli.length > 0 
+          ? ord.articoli 
+          : [ord];
+
+        const presente = listaCapi.some(capo => {
+          const matchId = capo.prodottoId && capo.prodottoId === id;
+          const matchNome = (capo.nomeProdotto || '').trim().toLowerCase() === nomeProdTarget;
+          return matchId || matchNome;
+        });
+
+        if (presente) ordiniTrovati++;
+      });
+
+      if (ordiniTrovati > 0) {
+        mostraMessaggio(
+          "Eliminazione non consentita",
+          `Impossibile eliminare "${prodDaEliminare?.nome || 'questo articolo'}": risulta presente in ${ordiniTrovati} ${ordiniTrovati === 1 ? 'ordine' : 'ordini'}. Puoi nasconderlo dal catalogo usando il tasto Nascondi.`,
+          "warning"
+        );
+        return;
+      }
+    } catch (err) {
+      console.error("Errore verifica ordini per eliminazione prodotto:", err);
+      mostraMessaggio("Errore", "Impossibile verificare lo storico degli ordini. Riprova più tardi.", "error");
+      return;
+    }
+
     chiediConferma(
       "Elimina Articolo",
-      "Eliminare definitivamente questo articolo dal catalogo?",
+      `Confermi l'eliminazione definitiva di "${prodDaEliminare?.nome || 'questo articolo'}" dal catalogo?`,
       async () => {
         try {
           await deleteDoc(doc(db, "prodotti", id));
-          mostraMessaggio("Eliminato", "Articolo eliminato dal catalogo.", "success");
+          mostraMessaggio("Eliminato", "Articolo rimosso definitivamente dal catalogo.", "info");
         } catch (err) { 
-          mostraMessaggio("Errore", "Errore: " + err.message, "error"); 
+          mostraMessaggio("Errore: " + err.message, "error"); 
         }
       },
       "Elimina"
     );
-  }, [chiediConferma, mostraMessaggio]);
+  }, [prodotti, settoreAttivo, chiediConferma, mostraMessaggio]);
 
-  const aggiornaOrdineAdmin = useCallback(async (ordineId, datiAggiornati) => {
-    try {
-      await updateDoc(doc(db, "ordini", ordineId), datiAggiornati);
-    } catch (err) { 
-      console.error("Errore aggiornamento:", err); 
-    }
-  }, []);
+  const aggiungiAlCarrello = useCallback(async (item) => {
+    if (!utenteLoggato) return;
+    const campoCarrello = settoreAttivo === 'nuoto' ? "carrello_nuoto" : "carrello_pallanuoto";
 
-  const salvaCampiModificatiOrdine = useCallback(async (ordineId, nuoviArticoli) => {
     try {
-      await updateDoc(doc(db, "ordini", ordineId), {
-        articoli: nuoviArticoli,
-        modificato_il: serverTimestamp()
-      });
-      mostraMessaggio("Aggiornato", "Ordine aggiornato con successo!", "success");
-      setOrdineInModifica(null);
+      const userRef = doc(db, "utenti", utenteLoggato.id);
+      await updateDoc(userRef, { [campoCarrello]: arrayUnion(item) });
+      mostraMessaggio("Carrello", `${item.nomeProdotto} aggiunto al carrello.`, "success");
     } catch (err) {
-      mostraMessaggio("Errore", "Errore aggiornamento ordine: " + err.message, "error");
+      console.error("Errore aggiornamento carrello:", err);
     }
-  }, [mostraMessaggio]);
+  }, [utenteLoggato, settoreAttivo, mostraMessaggio]);
 
-  const cancellaArticoloDaOrdine = useCallback(async (ordine, articoloIdUnivoco) => {
-    if (ordine.pagato || ordine.stato_pagamento !== "In attesa") {
-      mostraMessaggio("Non consentito", "Operazione non consentita: l'ordine è già saldato o è già stato inoltrato alla produzione.", "warning");
-      return;
+  const aggiornaCarrelloItem = useCallback(async (itemModificato) => {
+    if (!utenteLoggato) return;
+    const campoCarrello = settoreAttivo === 'nuoto' ? "carrello_nuoto" : "carrello_pallanuoto";
+
+    const carrelloAggiornato = carrello.map(item => {
+      if (item.idUnivoco === itemModificato.idUnivoco) {
+        return { ...itemModificato };
+      }
+      return item;
+    });
+
+    try {
+      const userRef = doc(db, "utenti", utenteLoggato.id);
+      await updateDoc(userRef, { [campoCarrello]: carrelloAggiornato });
+      mostraMessaggio("Carrello Aggiornato", "Articolo modificato con successo.", "success");
+    } catch (err) {
+      mostraMessaggio("Errore: " + err.message, "error");
     }
+  }, [utenteLoggato, settoreAttivo, carrello, mostraMessaggio]);
+
+  const rimuoviDalCarrello = useCallback(async (idUnivoco) => {
+    if (!utenteLoggato) return;
+    const campoCarrello = settoreAttivo === 'nuoto' ? "carrello_nuoto" : "carrello_pallanuoto";
+    const carrelloAttuale = carrello.filter(item => item.idUnivoco !== idUnivoco);
+
+    try {
+      const userRef = doc(db, "utenti", utenteLoggato.id);
+      await updateDoc(userRef, { [campoCarrello]: carrelloAttuale });
+    } catch (err) {
+      console.error("Errore rimozione capo carrello:", err);
+    }
+  }, [utenteLoggato, settoreAttivo, carrello]);
+
+  const totaleCarrello = useMemo(() => carrello.reduce((acc, item) => acc + item.prezzo, 0), [carrello]);
+
+  const gestisciCheckout = useCallback(() => {
+    if (!utenteLoggato || carrello.length === 0) return;
+    const campoCarrello = settoreAttivo === 'nuoto' ? "carrello_nuoto" : "carrello_pallanuoto";
     
+    // VERIFICA SE L'IMPORTO È MAGGIORE DI ZERO E GENERA IL LINK CON L'IMPORTO ANNESSO
+    const linkPaypalConImporto = totaleCarrello > 0 
+      ? `${linkPaypalSettore}/${totaleCarrello.toFixed(2)}` 
+      : linkPaypalSettore;
+
     chiediConferma(
-      "Rimuovi Articolo",
-      "Rimuovere questo articolo dall'ordine?",
+      "Conferma Ordine",
+      `Confermi l'invio di ${carrello.length} ${carrello.length === 1 ? 'capo' : 'capi'} per il settore ${settoreAttivo.toUpperCase()} (€${totaleCarrello.toFixed(2)})? Si aprirà PayPal per il pagamento.`,
       async () => {
+        setIsCheckout(true);
+        const popupRef = window.open('about:blank', '_blank');
+
         try {
-          const articoliAggiornati = (ordine.articoli || []).filter(a => a.idUnivoco !== articoloIdUnivoco);
-          if (articoliAggiornati.length === 0) {
-            await deleteDoc(doc(db, "ordini", ordine.id));
-            mostraMessaggio("Annullato", "Tutti gli articoli sono stati rimossi: l'ordine è stato annullato.", "success");
-            return;
-          }
-          const nuovoTotale = articoliAggiornati.reduce((acc, a) => acc + (a.prezzo || 0), 0);
-          await updateDoc(doc(db, "ordini", ordine.id), {
-            articoli: articoliAggiornati,
-            totale: nuovoTotale
+          const batch = writeBatch(db);
+          const ordiniColRef = collection(db, "ordini");
+
+          carrello.forEach((item) => {
+            const newOrdRef = doc(ordiniColRef);
+            batch.set(newOrdRef, {
+              ...item,
+              totale: item.prezzo,
+              disciplina: settoreAttivo,
+              stato_pagamento: "In attesa",
+              pagato: false,
+              completato: false,
+              utente_id: utenteLoggato.id,
+              acquirente: `${utenteLoggato.nome || ''} ${utenteLoggato.cognome || ''}`.trim() || utenteLoggato.email,
+              email_acquirente: utenteLoggato.email,
+              articoli: [item],
+              creato_il: serverTimestamp()
+            });
           });
-          mostraMessaggio("Aggiornato", "Articolo rimosso e totale aggiornato!", "success");
-        } catch (err) {
-          mostraMessaggio("Errore", "Errore rimozione articolo: " + err.message, "error");
+
+          const userRef = doc(db, "utenti", utenteLoggato.id);
+          batch.update(userRef, { [campoCarrello]: [] });
+          await batch.commit();
+
+          if (popupRef && !popupRef.closed) {
+            popupRef.location.href = linkPaypalConImporto;
+          } else {
+            const a = document.createElement('a');
+            a.href = linkPaypalConImporto;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          }
+        } catch (error) { 
+          if (popupRef && !popupRef.closed) popupRef.close();
+          mostraMessaggio("Errore: " + error.message, "error"); 
+        } finally { 
+          setIsCheckout(false); 
         }
       },
-      "Rimuovi"
+      "Procedi su PayPal"
     );
-  }, [chiediConferma, mostraMessaggio]);
+  }, [carrello, totaleCarrello, utenteLoggato, settoreAttivo, linkPaypalSettore, chiediConferma, mostraMessaggio]);
 
-  const annullaInteroOrdine = useCallback(async (ordine) => {
-    if (ordine.pagato || ordine.stato_pagamento !== "In attesa") {
-      mostraMessaggio("Non consentito", "Operazione non consentita: l'ordine è già saldato o è già stato inoltrato alla produzione.", "warning");
-      return;
-    }
-
-    chiediConferma(
-      "Annulla Ordine",
-      `Vuoi annullare definitivamente l'ordine #${ordine.id.slice(-6).toUpperCase()}?`,
-      async () => {
-        try {
-          await deleteDoc(doc(db, "ordini", ordine.id));
-          mostraMessaggio("Annullato", "Ordine annullato con successo.", "success");
-        } catch (err) {
-          mostraMessaggio("Errore", "Errore annullamento ordine: " + err.message, "error");
-        }
-      },
-      "Annulla Ordine"
-    );
-  }, [chiediConferma, mostraMessaggio]);
-
-  const ordiniInAttesaCount = useMemo(() => {
-    return tuttiGliOrdiniAdmin.filter(o => o.stato_pagamento === "In attesa").length;
-  }, [tuttiGliOrdiniAdmin]);
-
-  // Generatore Distinta XLS Multi-Tab Formattata
-  const generaXmlDistinta = useCallback((ordiniDaElaborare) => {
-    const TAGLIE_STANDARD = [
-      "Taglia Unica", "6A", "8A", "10A", "XXS", "XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL", "5XL"
-    ];
-
+  // EXCEL EXPORT
+  const generaFileXlsx = useCallback((ordiniDaElaborare) => {
+    const TAGLIE_STANDARD = ["Taglia Unica", "6A", "8A", "10A", "XXS", "XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL", "5XL"];
     const tuttiArticoli = [];
     ordiniDaElaborare.forEach(ord => {
-      (ord.articoli || []).forEach(art => {
+      if (ord.articoli && ord.articoli.length > 0) {
+        ord.articoli.forEach(art => tuttiArticoli.push({ 
+          ...art, 
+          acquirente: ord.acquirente || ord.email_acquirente || "-",
+          atleta: art.atleta || ord.atleta || "-"
+        }));
+      } else {
         tuttiArticoli.push({
-          ...art,
+          nomeProdotto: ord.nomeProdotto,
+          taglia: ord.taglia,
+          atleta: ord.atleta || "-",
+          nomePersonalizzato: ord.nomePersonalizzato,
+          numeroPersonalizzato: ord.numeroPersonalizzato,
+          colorePersonalizzato: ord.colorePersonalizzato,
           acquirente: ord.acquirente || ord.email_acquirente || "-"
         });
-      });
+      }
+    });
+
+    const isNuoto = settoreAttivo === 'nuoto';
+    const nomeSettoreTitolo = isNuoto ? 'NUOTO' : 'PALLANUOTO';
+    const wb = XLSX.utils.book_new();
+
+    const styleBanner = {
+      font: { name: "Calibri", sz: 12, bold: true, color: { rgb: "FFFFFF" } },
+      fill: { fgColor: { rgb: "002B80" } },
+      alignment: { horizontal: "center", vertical: "center" }
+    };
+    const styleSezioneTitle = {
+      font: { name: "Calibri", sz: 11, bold: true, color: { rgb: "FFFFFF" } },
+      fill: { fgColor: { rgb: "1E3A8A" } },
+      alignment: { horizontal: "left", vertical: "center" }
+    };
+    const styleHeaderCol = {
+      font: { name: "Calibri", sz: 10, bold: true, color: { rgb: "1E293B" } },
+      fill: { fgColor: { rgb: "E2E8F0" } },
+      alignment: { horizontal: "center", vertical: "center" }
+    };
+    const styleHeaderTotal = {
+      font: { name: "Calibri", sz: 10, bold: true, color: { rgb: "002B80" } },
+      fill: { fgColor: { rgb: "DBEAFE" } },
+      alignment: { horizontal: "center", vertical: "center" }
+    };
+    const styleCella = (alt, align = "center", bold = false) => ({
+      font: { name: "Calibri", sz: 10, bold: bold, color: { rgb: bold ? "0F172A" : "334155" } },
+      fill: { fgColor: { rgb: alt ? "F8FAFC" : "FFFFFF" } },
+      alignment: { horizontal: align, vertical: "center" }
     });
 
     const nomiProdottiUnivoci = Array.from(new Set(tuttiArticoli.map(a => a.nomeProdotto || "Capo")));
+    const numCols1 = nomiProdottiUnivoci.length + 2;
+
+    const dataWs1 = [
+      [{ v: `CIRCOLO NUOTO LUCCA - ${nomeSettoreTitolo} (RIEPILOGO TAGLIE)`, s: styleBanner }, ...Array(numCols1 - 1).fill({ v: "", s: styleBanner })],
+      [{ v: "Taglia", s: styleHeaderCol }, ...nomiProdottiUnivoci.map(p => ({ v: p, s: styleHeaderCol })), { v: "Totale", s: styleHeaderTotal }]
+    ];
+
     const totaliPerProdotto = {};
-    nomiProdottiUnivoci.forEach(nome => { totaliPerProdotto[nome] = 0; });
-    let totaleGeneraleAssoluto = 0;
+    nomiProdottiUnivoci.forEach(p => { totaliPerProdotto[p] = 0; });
+    let totaleGenerale = 0;
 
-    const nomeSettoreTitolo = settoreUtente === 'pallanuoto' ? 'PALLANUOTO' : 'NUOTO';
-
-    let xmlFoglio1 = `<Worksheet ss:Name="Riepilogo Taglie"><Table>`;
-    xmlFoglio1 += `<Column ss:Width="110"/>`;
-    nomiProdottiUnivoci.forEach(() => { xmlFoglio1 += `<Column ss:Width="130"/>`; });
-    xmlFoglio1 += `<Column ss:Width="90"/>`;
-
-    const colSpan = nomiProdottiUnivoci.length + 2;
-    xmlFoglio1 += `
-      <Row ss:Height="28">
-        <Cell ss:MergeAcross="${colSpan - 1}" ss:StyleID="sHeaderBanner">
-          <Data ss:Type="String">CIRCOLO NUOTO LUCCA - ${nomeSettoreTitolo}</Data>
-        </Cell>
-      </Row>
-    `;
-
-    xmlFoglio1 += `<Row ss:Height="24">`;
-    xmlFoglio1 += `<Cell ss:StyleID="sHeaderCol"><Data ss:Type="String">Taglia</Data></Cell>`;
-    nomiProdottiUnivoci.forEach(prod => {
-      xmlFoglio1 += `<Cell ss:StyleID="sHeaderCol"><Data ss:Type="String">${prod}</Data></Cell>`;
-    });
-    xmlFoglio1 += `<Cell ss:StyleID="sHeaderColTotal"><Data ss:Type="String">Totale Riga</Data></Cell>`;
-    xmlFoglio1 += `</Row>`;
-
-    TAGLIE_STANDARD.forEach((taglia, index) => {
+    TAGLIE_STANDARD.forEach((taglia, idx) => {
+      const alt = idx % 2 !== 0;
       let sommaRiga = 0;
-      const stileRiga = index % 2 === 0 ? "sCella" : "sCellaAlt";
-      const stileTaglia = index % 2 === 0 ? "sTaglia" : "sTagliaAlt";
-
-      xmlFoglio1 += `<Row ss:Height="20">`;
-      xmlFoglio1 += `<Cell ss:StyleID="${stileTaglia}"><Data ss:Type="String">${taglia}</Data></Cell>`;
+      const riga = [{ v: taglia, s: styleCella(alt, "left", true) }];
 
       nomiProdottiUnivoci.forEach(nomeProd => {
         const conteggio = tuttiArticoli.filter(a => {
           const tagliaArt = (a.taglia || "Taglia Unica").trim().toUpperCase();
           return a.nomeProdotto === nomeProd && tagliaArt === taglia.toUpperCase();
         }).length;
-
         totaliPerProdotto[nomeProd] += conteggio;
         sommaRiga += conteggio;
-        xmlFoglio1 += `<Cell ss:StyleID="${stileRiga}"><Data ss:Type="Number">${conteggio}</Data></Cell>`;
+        riga.push({ v: conteggio, t: "n", s: styleCella(alt, "center", false) });
       });
 
-      totaleGeneraleAssoluto += sommaRiga;
-      xmlFoglio1 += `<Cell ss:StyleID="sTotaleRiga"><Data ss:Type="Number">${sommaRiga}</Data></Cell>`;
-      xmlFoglio1 += `</Row>`;
+      totaleGenerale += sommaRiga;
+      riga.push({ v: sommaRiga, t: "n", s: styleHeaderTotal });
+      dataWs1.push(riga);
     });
 
-    xmlFoglio1 += `<Row ss:Height="24">`;
-    xmlFoglio1 += `<Cell ss:StyleID="sTotaleFinale"><Data ss:Type="String">TOTALE ARTICOLI</Data></Cell>`;
-    nomiProdottiUnivoci.forEach(nomeProd => {
-      xmlFoglio1 += `<Cell ss:StyleID="sTotaleFinale"><Data ss:Type="Number">${totaliPerProdotto[nomeProd]}</Data></Cell>`;
-    });
-    xmlFoglio1 += `<Cell ss:StyleID="sTotaleAssoluto"><Data ss:Type="Number">${totaleGeneraleAssoluto}</Data></Cell>`;
-    xmlFoglio1 += `</Row>`;
-    xmlFoglio1 += `</Table></Worksheet>`;
+    dataWs1.push([
+      { v: "TOTALE ASSOLUTO", s: styleHeaderTotal },
+      ...nomiProdottiUnivoci.map(p => ({ v: totaliPerProdotto[p], t: "n", s: styleHeaderTotal })),
+      { v: totaleGenerale, t: "n", s: styleHeaderTotal }
+    ]);
 
-    let xmlFoglio2 = `<Worksheet ss:Name="Personalizzazioni"><Table>`;
-    xmlFoglio2 += `<Column ss:Width="170"/>`;
-    xmlFoglio2 += `<Column ss:Width="90"/>`;
-    xmlFoglio2 += `<Column ss:Width="160"/>`;
-    xmlFoglio2 += `<Column ss:Width="80"/>`;
-    xmlFoglio2 += `<Column ss:Width="120"/>`;
-    xmlFoglio2 += `<Column ss:Width="170"/>`;
+    const ws1 = XLSX.utils.aoa_to_sheet(dataWs1);
+    ws1['!merges'] = [{ s: { r: 0, c: 0 }, e: { r: 0, c: numCols1 - 1 } }];
+    ws1['!cols'] = [{ wch: 18 }, ...nomiProdottiUnivoci.map(() => ({ wch: 22 })), { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, ws1, "Riepilogo Taglie");
 
-    xmlFoglio2 += `
-      <Row ss:Height="28">
-        <Cell ss:MergeAcross="5" ss:StyleID="sHeaderBanner">
-          <Data ss:Type="String">ELENCO PERSONALIZZAZIONI</Data>
-        </Cell>
-      </Row>
-    `;
+    const dataWs2 = [
+      [{ v: `CIRCOLO NUOTO LUCCA - ${nomeSettoreTitolo} (DETTAGLIO PERSONALIZZAZIONI)`, s: styleBanner }, ...Array(4).fill({ v: "", s: styleBanner })],
+      []
+    ];
+    let rigaCorrente = 2;
+    const mergesWs2 = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }];
 
-    const tipiArticoloUnivoci = Array.from(
-      new Set(tuttiArticoli.map(a => (a.nomeProdotto || "ALTRO").trim()))
-    ).sort((a, b) => a.localeCompare(b, 'it', { sensitivity: 'base' }));
+    const capiConNome = tuttiArticoli.filter(a => a.nomePersonalizzato && String(a.nomePersonalizzato).trim() !== "");
+    dataWs2.push([
+      { v: `1. PERSONALIZZAZIONE NOME / SCRITTA (${capiConNome.length} CAPI)`, s: styleSezioneTitle },
+      ...Array(4).fill({ v: "", s: styleSezioneTitle })
+    ]);
+    mergesWs2.push({ s: { r: rigaCorrente, c: 0 }, e: { r: rigaCorrente, c: 4 } });
+    rigaCorrente++;
 
-    tipiArticoloUnivoci.forEach(tipoCapo => {
-      const articoliDelGruppo = tuttiArticoli.filter(
-        a => (a.nomeProdotto || "ALTRO").trim() === tipoCapo
-      );
+    dataWs2.push([
+      { v: "Articolo", s: styleHeaderCol },
+      { v: "Taglia", s: styleHeaderCol },
+      { v: "Nome Atleta", s: styleHeaderCol },
+      { v: "TESTO DA APPLICARE (MAIUSCOLO)", s: styleHeaderTotal },
+      { v: "Riferimento Ordine", s: styleHeaderCol }
+    ]);
+    rigaCorrente++;
 
-      articoliDelGruppo.sort((a, b) => {
-        const numA = parseInt(a.numeroPersonalizzato, 10);
-        const numB = parseInt(b.numeroPersonalizzato, 10);
-        const haNumA = !isNaN(numA);
-        const haNumB = !isNaN(numB);
-
-        if (haNumA && haNumB) {
-          if (numA !== numB) return numA - numB;
-        } else if (haNumA) {
-          return -1;
-        } else if (haNumB) {
-          return 1;
-        }
-
-        const nomeA = (a.nomePersonalizzato || '').trim().toUpperCase();
-        const nomeB = (b.nomePersonalizzato || '').trim().toUpperCase();
-        if (nomeA && nomeB && nomeA !== nomeB) {
-          return nomeA.localeCompare(nomeB, 'it');
-        } else if (nomeA) {
-          return -1;
-        } else if (nomeB) {
-          return 1;
-        }
-
-        return (a.taglia || '').localeCompare(b.taglia || '', 'it');
+    if (capiConNome.length === 0) {
+      dataWs2.push([{ v: "Nessun capo con stampa nome", s: styleCella(false, "left") }, ...Array(4).fill({ v: "", s: styleCella(false) })]);
+      mergesWs2.push({ s: { r: rigaCorrente, c: 0 }, e: { r: rigaCorrente, c: 4 } });
+      rigaCorrente++;
+    } else {
+      capiConNome.forEach((art, idx) => {
+        const alt = idx % 2 !== 0;
+        dataWs2.push([
+          { v: art.nomeProdotto || "Capo", s: styleCella(alt, "left") },
+          { v: art.taglia || "Unica", s: styleCella(alt, "center") },
+          { v: art.atleta || "-", s: styleCella(alt, "left") },
+          { v: String(art.nomePersonalizzato).toUpperCase(), s: styleCella(alt, "center", true) },
+          { v: art.acquirente || "-", s: styleCella(alt, "left") }
+        ]);
+        rigaCorrente++;
       });
-
-      xmlFoglio2 += `
-        <Row ss:Height="24">
-          <Cell ss:MergeAcross="5" ss:StyleID="sHeaderBanner">
-            <Data ss:Type="String">${tipoCapo.toUpperCase()} (Totale: ${articoliDelGruppo.length} pz)</Data>
-          </Cell>
-        </Row>
-        <Row ss:Height="22">
-          <Cell ss:StyleID="sHeaderCol"><Data ss:Type="String">Articolo</Data></Cell>
-          <Cell ss:StyleID="sHeaderCol"><Data ss:Type="String">Taglia</Data></Cell>
-          <Cell ss:StyleID="sHeaderCol"><Data ss:Type="String">Nome</Data></Cell>
-          <Cell ss:StyleID="sHeaderCol"><Data ss:Type="String">Numero</Data></Cell>
-          <Cell ss:StyleID="sHeaderCol"><Data ss:Type="String">Colore</Data></Cell>
-          <Cell ss:StyleID="sHeaderCol"><Data ss:Type="String">Acquirente</Data></Cell>
-        </Row>
-      `;
-
-      articoliDelGruppo.forEach((art, idx) => {
-        const stileRiga = idx % 2 === 0 ? "sCella" : "sCellaAlt";
-        const stileBold = idx % 2 === 0 ? "sTaglia" : "sTagliaAlt";
-
-        xmlFoglio2 += `<Row ss:Height="20">`;
-        xmlFoglio2 += `<Cell ss:StyleID="${stileBold}"><Data ss:Type="String">${art.nomeProdotto || "-"}</Data></Cell>`;
-        xmlFoglio2 += `<Cell ss:StyleID="${stileRiga}"><Data ss:Type="String">${art.taglia || "Unica"}</Data></Cell>`;
-        xmlFoglio2 += `<Cell ss:StyleID="${stileBold}"><Data ss:Type="String">${art.nomePersonalizzato ? art.nomePersonalizzato.toUpperCase() : "-"}</Data></Cell>`;
-        xmlFoglio2 += `<Cell ss:StyleID="${stileRiga}"><Data ss:Type="String">${art.numeroPersonalizzato ? `N° ${art.numeroPersonalizzato}` : "-"}</Data></Cell>`;
-        xmlFoglio2 += `<Cell ss:StyleID="${stileRiga}"><Data ss:Type="String">${art.colorePersonalizzato ? art.colorePersonalizzato.toUpperCase() : "-"}</Data></Cell>`;
-        xmlFoglio2 += `<Cell ss:StyleID="${stileRiga}"><Data ss:Type="String">${art.acquirente || "-"}</Data></Cell>`;
-        xmlFoglio2 += `</Row>`;
-      });
-
-      xmlFoglio2 += `<Row ss:Height="14"></Row>`;
-    });
-
-    xmlFoglio2 += `</Table></Worksheet>`;
-
-    return `<?xml version="1.0" encoding="UTF-8"?>
-<?mso-application progid="Excel.Sheet"?>
-<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:o="urn:schemas-microsoft-com:office:office"
- xmlns:x="urn:schemas-microsoft-com:office:excel"
- xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
- xmlns:html="http://www.w3.org/TR/REC-html40">
- <Styles>
-  <Style ss:ID="Default" ss:Name="Normal">
-   <Alignment ss:Vertical="Center"/>
-   <Borders/>
-   <Font ss:FontName="Calibri" ss:Size="11" ss:Color="#000000"/>
-  </Style>
-  <Style ss:ID="sHeaderBanner">
-   <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-   <Borders><Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#001a4d"/></Borders>
-   <Font ss:FontName="Calibri" ss:Size="13" ss:Bold="1" ss:Color="#FFFFFF"/>
-   <Interior ss:Color="#002B80" ss:Pattern="Solid"/>
-  </Style>
-  <Style ss:ID="sHeaderCol">
-   <Alignment ss:Horizontal="Center" ss:Vertical="Center" ss:WrapText="1"/>
-   <Borders>
-    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#94A3B8"/>
-    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
-    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
-    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
-   </Borders>
-   <Font ss:FontName="Calibri" ss:Size="10" ss:Bold="1" ss:Color="#1E293B"/>
-   <Interior ss:Color="#E2E8F0" ss:Pattern="Solid"/>
-  </Style>
-  <Style ss:ID="sHeaderColTotal">
-   <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-   <Borders>
-    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#94A3B8"/>
-    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
-    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
-    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
-   </Borders>
-   <Font ss:FontName="Calibri" ss:Size="10" ss:Bold="1" ss:Color="#002B80"/>
-   <Interior ss:Color="#DBEAFE" ss:Pattern="Solid"/>
-  </Style>
-  <Style ss:ID="sCella">
-   <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-   <Borders>
-    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
-    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
-    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
-    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
-   </Borders>
-   <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#334155"/>
-   <Interior ss:Color="#FFFFFF" ss:Pattern="Solid"/>
-  </Style>
-  <Style ss:ID="sCellaAlt">
-   <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-   <Borders>
-    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
-    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
-    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
-    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
-   </Borders>
-   <Font ss:FontName="Calibri" ss:Size="10" ss:Color="#334155"/>
-   <Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/>
-  </Style>
-  <Style ss:ID="sTaglia">
-   <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
-   <Borders>
-    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
-    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
-    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
-    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
-   </Borders>
-   <Font ss:FontName="Calibri" ss:Size="10" ss:Bold="1" ss:Color="#0F172A"/>
-   <Interior ss:Color="#FFFFFF" ss:Pattern="Solid"/>
-  </Style>
-  <Style ss:ID="sTagliaAlt">
-   <Alignment ss:Horizontal="Left" ss:Vertical="Center"/>
-   <Borders>
-    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
-    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
-    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
-    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#E2E8F0"/>
-   </Borders>
-   <Font ss:FontName="Calibri" ss:Size="10" ss:Bold="1" ss:Color="#0F172A"/>
-   <Interior ss:Color="#F8FAFC" ss:Pattern="Solid"/>
-  </Style>
-  <Style ss:ID="sTotaleRiga">
-   <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-   <Borders>
-    <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
-    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
-    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
-    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
-   </Borders>
-   <Font ss:FontName="Calibri" ss:Size="10" ss:Bold="1" ss:Color="#002B80"/>
-   <Interior ss:Color="#EFF6FF" ss:Pattern="Solid"/>
-  </Style>
-  <Style ss:ID="sTotaleFinale">
-   <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-   <Borders>
-    <Border ss:Position="Bottom" ss:LineStyle="Double" ss:Weight="3" ss:Color="#002B80"/>
-    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#002B80"/>
-    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
-    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#CBD5E1"/>
-   </Borders>
-   <Font ss:FontName="Calibri" ss:Size="11" ss:Bold="1" ss:Color="#002B80"/>
-   <Interior ss:Color="#DBEAFE" ss:Pattern="Solid"/>
-  </Style>
-  <Style ss:ID="sTotaleAssoluto">
-   <Alignment ss:Horizontal="Center" ss:Vertical="Center"/>
-   <Borders>
-    <Border ss:Position="Bottom" ss:LineStyle="Double" ss:Weight="3" ss:Color="#002B80"/>
-    <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#002B80"/>
-    <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#002B80"/>
-    <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="2" ss:Color="#002B80"/>
-   </Borders>
-   <Font ss:FontName="Calibri" ss:Size="12" ss:Bold="1" ss:Color="#FFFFFF"/>
-   <Interior ss:Color="#002B80" ss:Pattern="Solid"/>
-  </Style>
- </Styles>
- ${xmlFoglio1}
- ${xmlFoglio2}
-</Workbook>`;
-  }, [settoreUtente]);
-
-  const mandaInLavorazioneConEmail = useCallback(async () => {
-    const daAggiornare = tuttiGliOrdiniAdmin.filter(o => o.stato_pagamento === "In attesa");
-    if (daAggiornare.length === 0) {
-      mostraMessaggio("Nessun Ordine", "Nessun ordine con stato 'In attesa' da mandare in lavorazione.", "info");
-      return;
     }
 
-    const nomeSettoreFile = settoreUtente === 'pallanuoto' ? 'PALLANUOTO' : 'NUOTO';
-    const nomeFile = `ORDINE_${nomeSettoreFile}_LUCCA.xls`;
-    const nomeSettoreTesto = settoreUtente === 'pallanuoto' ? 'Pallanuoto' : 'Nuoto';
+    dataWs2.push([]);
+    rigaCorrente++;
 
-    chiediConferma(
-      "Manda in Lavorazione",
-      `Confermi il passaggio a "In lavorazione" di ${daAggiornare.length} ordini per il settore ${nomeSettoreTesto}?\n` +
-      `Il file ${nomeFile} verrà scaricato automaticamente e si aprirà l'email per simonedelpapa@outlook.it.`,
-      async () => {
-        setInvioProduzioneInCorso(true);
-        try {
-          const batch = writeBatch(db);
-          daAggiornare.forEach(ord => {
-            const docRef = doc(db, "ordini", ord.id);
-            batch.update(docRef, { 
-              stato_pagamento: "In lavorazione",
-              inviato_produzione_il: serverTimestamp()
-            });
-          });
-          await batch.commit();
+    if (!isNuoto) {
+      const calotteConNumeroOColore = tuttiArticoli.filter(a => 
+        (a.numeroPersonalizzato && String(a.numeroPersonalizzato).trim() !== "") || 
+        (a.colorePersonalizzato && String(a.colorePersonalizzato).trim() !== "")
+      );
 
-          const xmlDoc = generaXmlDistinta(daAggiornare);
-          const blob = new Blob([xmlDoc], { type: 'application/vnd.ms-excel;charset=utf-8;' });
-          const url = URL.createObjectURL(blob);
-          
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = nomeFile;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
+      dataWs2.push([
+        { v: `2. CALOTTE & ARTICOLI CON NUMERO E COLORE (${calotteConNumeroOColore.length} CAPI)`, s: styleSezioneTitle },
+        ...Array(4).fill({ v: "", s: styleSezioneTitle })
+      ]);
+      mergesWs2.push({ s: { r: rigaCorrente, c: 0 }, e: { r: rigaCorrente, c: 4 } });
+      rigaCorrente++;
 
-          const emailDestinatario = "simonedelpapa@outlook.it";
-          const oggettoMail = encodeURIComponent(`Ordine ${nomeSettoreTesto} Lucca`);
-          const corpoMail = encodeURIComponent(
-            `Gentile Okeo,\n\nIn allegato trovate la distinta (${nomeFile}) contenente il riepilogo taglie e le relative personalizzazioni per gli ordini approvati del settore ${nomeSettoreTesto}.\n\nRestiamo in attesa di conferma.\n\nCordiali saluti,\nCircolo Nuoto Lucca`
-          );
+      dataWs2.push([
+        { v: "Articolo", s: styleHeaderCol },
+        { v: "Nome Atleta", s: styleHeaderCol },
+        { v: "Numero", s: styleHeaderTotal },
+        { v: "Colore Calotta", s: styleHeaderTotal },
+        { v: "Riferimento Ordine", s: styleHeaderCol }
+      ]);
+      rigaCorrente++;
 
-          window.open(`mailto:${emailDestinatario}?subject=${oggettoMail}&body=${corpoMail}`, '_blank');
+      if (calotteConNumeroOColore.length === 0) {
+        dataWs2.push([{ v: "Nessun articolo con numero/colore calotta", s: styleCella(false, "left") }, ...Array(4).fill({ v: "", s: styleCella(false) })]);
+        mergesWs2.push({ s: { r: rigaCorrente, c: 0 }, e: { r: rigaCorrente, c: 4 } });
+      } else {
+        calotteConNumeroOColore.forEach((art, idx) => {
+          const alt = idx % 2 !== 0;
+          dataWs2.push([
+            { v: art.nomeProdotto || "Capo", s: styleCella(alt, "left") },
+            { v: art.atleta || "-", s: styleCella(alt, "left") },
+            { v: art.numeroPersonalizzato ? `N° ${art.numeroPersonalizzato}` : "-", s: styleCella(alt, "center", true) },
+            { v: art.colorePersonalizzato || "BIANCA", s: styleCella(alt, "center", true) },
+            { v: art.acquirente || "-", s: styleCella(alt, "left") }
+          ]);
+          rigaCorrente++;
+        });
+      }
+    }
 
-          mostraMessaggio(
-            "Operazione Completata",
-            `File Excel ${nomeFile} scaricato con successo e ${daAggiornare.length} ordini messi in lavorazione!\nAllega il file appena scaricato all'email che si è aperta.`,
-            "success"
-          );
-        } catch (error) {
-          mostraMessaggio("Errore", "Errore durante l'operazione: " + error.message, "error");
-        } finally {
-          setInvioProduzioneInCorso(false);
-        }
-      },
-      "Procedi"
-    );
-  }, [tuttiGliOrdiniAdmin, settoreUtente, generaXmlDistinta, chiediConferma, mostraMessaggio]);
+    const ws2 = XLSX.utils.aoa_to_sheet(dataWs2);
+    ws2['!merges'] = mergesWs2;
+    ws2['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 24 }, { wch: 32 }, { wch: 26 }];
+    XLSX.utils.book_append_sheet(wb, ws2, "Personalizzazioni");
+
+    return wb;
+  }, [settoreAttivo]);
+
+  const mandaInLavorazioneConEmail = useCallback(async (ordiniSelezionati) => {
+    const daAggiornare = ordiniSelezionati && ordiniSelezionati.length > 0 
+      ? ordiniSelezionati 
+      : tuttiGliOrdiniAdmin.filter(o => o.stato_pagamento === "In attesa");
+
+    if (daAggiornare.length === 0) return;
+
+    setInvioProduzioneInCorso(true);
+    try {
+      const batch = writeBatch(db);
+      daAggiornare.forEach(ord => {
+        batch.update(doc(db, "ordini", ord.id), { 
+          stato_pagamento: "In lavorazione",
+          completato: false,
+          inviato_produzione_il: serverTimestamp()
+        });
+      });
+      await batch.commit();
+
+      const wb = generaFileXlsx(daAggiornare);
+      const nomeFile = `ORDINE_${settoreAttivo.toUpperCase()}_LUCCA.xlsx`;
+      XLSX.writeFile(wb, nomeFile);
+
+      mostraMessaggio("In Lavorazione", `${daAggiornare.length} articoli inoltrati.`, "success");
+    } catch (error) {
+      mostraMessaggio("Errore: " + error.message, "error");
+    } finally {
+      setInvioProduzioneInCorso(false);
+    }
+  }, [tuttiGliOrdiniAdmin, settoreAttivo, generaFileXlsx, mostraMessaggio]);
 
   const esportaCsvAdmin = useCallback(() => {
     try {
-      if (tuttiGliOrdiniAdmin.length === 0) {
-        mostraMessaggio("Nessun Ordine", "Non ci sono ordini da esportare per questo settore.", "info");
-        return;
-      }
-      const nomeSettoreFile = settoreUtente === 'pallanuoto' ? 'PALLANUOTO' : 'NUOTO';
-      const nomeFile = `ORDINE_${nomeSettoreFile}_LUCCA.xls`;
-
-      const xmlDoc = generaXmlDistinta(tuttiGliOrdiniAdmin);
-      const blob = new Blob([xmlDoc], { type: 'application/vnd.ms-excel;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = nomeFile;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-      mostraMessaggio("Esportazione Completata", `File ${nomeFile} generato con successo!`, "success");
+      if (tuttiGliOrdiniAdmin.length === 0) return;
+      const wb = generaFileXlsx(tuttiGliOrdiniAdmin);
+      XLSX.writeFile(wb, `ORDINI_${settoreAttivo.toUpperCase()}_LUCCA.xlsx`);
+      mostraMessaggio("Esportato", "File scaricato con successo.", "success");
     } catch (err) {
-      mostraMessaggio("Errore Esportazione", "Si è verificato un errore: " + err.message, "error");
+      mostraMessaggio("Errore: " + err.message, "error");
     }
-  }, [tuttiGliOrdiniAdmin, settoreUtente, generaXmlDistinta, mostraMessaggio]);
-
-  const aggiungiAlCarrello = useCallback((item) => setCarrello(prev => [...prev, item]), []);
-  const rimuoviDalCarrello = useCallback((idUnivoco) => setCarrello(prev => prev.filter(item => item.idUnivoco !== idUnivoco)), []);
-  const totaleCarrello = useMemo(() => carrello.reduce((acc, item) => acc + item.prezzo, 0), [carrello]);
-
-  const gestisciCheckout = useCallback(() => {
-    if (!utenteLoggato) return;
-    if (carrello.length === 0) return;
-
-    setModalConfig({
-      isOpen: true,
-      tipo: 'info',
-      titolo: 'Reindirizzamento a PayPal',
-      messaggio: `Il tuo ordine è pronto! Cliccando su "Procedi al Pagamento", l'ordine verrà registrato e si aprirà il canale PayPal del Circolo Nuoto Lucca (${settoreUtente}) con l'importo esatto di €${totaleCarrello.toFixed(2)}.`,
-      testoConferma: 'Procedi al Pagamento',
-      testoAnnulla: 'Annulla',
-      onConferma: async () => {
-        setIsCheckout(true);
-        try {
-          await addDoc(collection(db, "ordini"), {
-            totale: totaleCarrello,
-            disciplina: settoreUtente,
-            stato_pagamento: "In attesa",
-            pagato: false,
-            utente_id: utenteLoggato.id,
-            acquirente: `${utenteLoggato.nome || ''} ${utenteLoggato.cognome || ''}`.trim() || utenteLoggato.email,
-            email_acquirente: utenteLoggato.email,
-            articoli: carrello,
-            creato_il: serverTimestamp()
-          });
-          
-          setCarrello([]);
-          
-          const linkPaypalConImporto = `${linkPaypalSettore}/${totaleCarrello.toFixed(2)}`;
-          window.open(linkPaypalConImporto, '_blank', 'noopener,noreferrer');
-        } catch (error) { 
-          mostraMessaggio("Errore", "Errore durante l'invio dell'ordine: " + error.message, "error"); 
-        } finally { 
-          setIsCheckout(false); 
-        }
-      }
-    });
-  }, [carrello, totaleCarrello, utenteLoggato, settoreUtente, linkPaypalSettore, mostraMessaggio]);
-
-  const gestisciLogout = useCallback(async () => {
-    try {
-      sessionStorage.removeItem("cnl_settore_richiesto");
-      localStorage.removeItem("cnl_admin_tab");
-      await signOut(auth);
-    } catch (err) {
-      console.error("Errore logout:", err);
-    }
-  }, []);
+  }, [tuttiGliOrdiniAdmin, settoreAttivo, generaFileXlsx, mostraMessaggio]);
 
   const ordiniAdminRaggruppatiPerUtente = useMemo(() => {
     const gruppiMap = new Map();
@@ -937,10 +1110,8 @@ export default function App() {
       const termine = ricercaAdmin.toLowerCase().trim();
       const acquirenteStr = (ord.acquirente || '').toLowerCase();
       const emailStr = (ord.email_acquirente || '').toLowerCase();
-      const matchId = String(ord.id).toLowerCase().includes(termine);
-      const matchAtleta = (ord.articoli || []).some(art => (art.atleta || '').toLowerCase().includes(termine));
 
-      if (matchStato && (termine === '' || acquirenteStr.includes(termine) || emailStr.includes(termine) || matchId || matchAtleta)) {
+      if (matchStato && (!termine || acquirenteStr.includes(termine) || emailStr.includes(termine))) {
         const chiaveUtente = ord.email_acquirente || "Sconosciuta";
         if (!gruppiMap.has(chiaveUtente)) {
           gruppiMap.set(chiaveUtente, {
@@ -953,175 +1124,418 @@ export default function App() {
         }
         const gruppo = gruppiMap.get(chiaveUtente);
         gruppo.ordini.push(ord);
-        if (ord.pagato) {
-          gruppo.totalePagato += (ord.totale || 0);
-        } else {
-          gruppo.totaleDovuto += (ord.totale || 0);
-        }
+        const importo = Number(ord.prezzo || ord.totale || 0);
+        if (ord.pagato) gruppo.totalePagato += importo;
+        else gruppo.totaleDovuto += importo;
       }
     });
     return Array.from(gruppiMap.values());
   }, [tuttiGliOrdiniAdmin, ricercaAdmin, filtroStatoAdmin]);
 
-  const inviaSollecitoSingolo = useCallback(async (gruppo) => {
-    if (gruppo.totaleDovuto <= 0) return;
-
-    const utenteId = gruppo.ordini[0]?.utente_id;
-    if (!utenteId) {
-      mostraMessaggio("Errore", "Impossibile identificare l'ID dell'utente.", "error");
-      return;
-    }
-
-    const dettagliOrdini = gruppo.ordini
-      .filter(o => !o.pagato)
-      .map(o => ({
-        idOrdine: o.id,
-        stato: o.stato_pagamento,
-        totale: o.totale,
-        capi: (o.articoli || []).map(a => `${a.nomeProdotto} (${a.atleta})`).join(", ")
-      }));
-
-    const linkPaypalConImporto = `${linkPaypalSettore}/${gruppo.totaleDovuto.toFixed(2)}`;
-    const dataOggi = new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-
-    chiediConferma(
-      "Invia Sollecito",
-      `Inviare una notifica di sollecito a ${gruppo.acquirente} per un totale dovuto di €${gruppo.totaleDovuto.toFixed(2)}?`,
-      async () => {
-        try {
-          await addDoc(collection(db, "utenti", utenteId, "notifiche"), {
-            titolo: "Sollecito Pagamento Ordini",
-            messaggio: `Risultano ordini non saldati per un totale di €${gruppo.totaleDovuto.toFixed(2)}. Clicca sul pulsante per completare il pagamento tramite PayPal.`,
-            totaleDovuto: gruppo.totaleDovuto,
-            dettagliOrdini: dettagliOrdini,
-            linkPaypal: linkPaypalConImporto,
-            data_invio: dataOggi,
-            creato_il: serverTimestamp()
-          });
-
-          const subject = encodeURIComponent("Sollecito Pagamento - CNL Shop");
-          const body = encodeURIComponent(
-            `Ciao ${gruppo.acquirente},\n\nTi ricordiamo che risultano ordini da saldare su CNL Shop per un totale di €${gruppo.totaleDovuto.toFixed(2)}.\n\nPuoi procedere comodamente al pagamento tramite il link PayPal:\n${linkPaypalConImporto}\n\nGrazie,\nCircolo Nuoto Lucca`
-          );
-          window.open(`mailto:${gruppo.email}?subject=${subject}&body=${body}`, '_blank');
-
-          mostraMessaggio("Inviato", `Sollecito inviato con successo a ${gruppo.acquirente}!`, "success");
-        } catch (err) {
-          mostraMessaggio("Errore", "Errore invio sollecito: " + err.message, "error");
-        }
-      },
-      "Invia Notifica"
-    );
-  }, [linkPaypalSettore, mostraMessaggio, chiediConferma]);
-
-  const inviaSollecitoMassivo = useCallback(async () => {
-    const utentiMorosi = ordiniAdminRaggruppatiPerUtente.filter(g => g.totaleDovuto > 0);
-
-    if (utentiMorosi.length === 0) {
-      mostraMessaggio("Tutto Saldato", "Non ci sono account con ordini in sospeso da saldare.", "info");
-      return;
-    }
-
-    chiediConferma(
-      "Sollecito Massivo",
-      `Confermi l'invio della notifica di saldo a tutti i ${utentiMorosi.length} utenti che hanno ordini non ancora pagati?`,
-      async () => {
-        try {
-          const batch = writeBatch(db);
-          const dataOggi = new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-
-          utentiMorosi.forEach(gruppo => {
-            const utenteId = gruppo.ordini[0]?.utente_id;
-            if (utenteId) {
-              const notifRef = doc(collection(db, "utenti", utenteId, "notifiche"));
-              const linkPaypalConImporto = `${linkPaypalSettore}/${gruppo.totaleDovuto.toFixed(2)}`;
-              const dettagliOrdini = gruppo.ordini
-                .filter(o => !o.pagato)
-                .map(o => ({
-                  idOrdine: o.id,
-                  stato: o.stato_pagamento,
-                  totale: o.totale,
-                  capi: (o.articoli || []).map(a => `${a.nomeProdotto} (${a.atleta})`).join(", ")
-                }));
-
-              batch.set(notifRef, {
-                titolo: "Sollecito Pagamento Ordini",
-                messaggio: `Risultano ordini non saldati per un totale di €${gruppo.totaleDovuto.toFixed(2)}. Clicca sul pulsante per completare il pagamento tramite PayPal.`,
-                totaleDovuto: gruppo.totaleDovuto,
-                dettagliOrdini: dettagliOrdini,
-                linkPaypal: linkPaypalConImporto,
-                data_invio: dataOggi,
-                creato_il: serverTimestamp()
-              });
-            }
-          });
-
-          await batch.commit();
-          mostraMessaggio("Inoltro Completato", `Notifiche inviate a ${utentiMorosi.length} utenti con successo!`, "success");
-        } catch (err) {
-          mostraMessaggio("Errore", "Errore durante l'invio massivo: " + err.message, "error");
-        }
-      },
-      "Invia a Tutti"
-    );
-  }, [ordiniAdminRaggruppatiPerUtente, linkPaypalSettore, mostraMessaggio, chiediConferma]);
-
-  const statisticheAdmin = useMemo(() => {
-    const stats = { inAttesa: 0, inLavorazione: 0, pronti: 0, completati: 0, incassoTotale: 0, incassoVerificato: 0, totaleArticoliVenduti: 0 };
-    tuttiGliOrdiniAdmin.forEach(o => {
-      if (o.stato_pagamento === 'In attesa') stats.inAttesa++;
-      if (o.stato_pagamento === 'In lavorazione') stats.inLavorazione++;
-      if (o.stato_pagamento === 'Pronto per il ritiro') stats.pronti++;
-      if (o.stato_pagamento === 'Completato') stats.completati++;
-      stats.incassoTotale += (o.totale || 0);
-      if (o.pagato) {
-        stats.incassoVerificato += (o.totale || 0);
-        if (o.articoli) stats.totaleArticoliVenduti += o.articoli.length;
-      }
-    });
-    return stats;
+  const ordiniInAttesaCount = useMemo(() => {
+    return tuttiGliOrdiniAdmin.filter(o => o.stato_pagamento === "In attesa").length;
   }, [tuttiGliOrdiniAdmin]);
 
   const inizialiUtente = useMemo(() => {
     if (!utenteLoggato) return "CN";
-    const nome = utenteLoggato.nome || "";
-    const cognome = utenteLoggato.cognome || "";
-    if (nome && cognome) return `${nome[0]}${cognome[0]}`.toUpperCase();
-    if (nome) return nome.slice(0, 2).toUpperCase();
+    const n = utenteLoggato.nome || "";
+    const c = utenteLoggato.cognome || "";
+    if (n && c) return `${n[0]}${c[0]}`.toUpperCase();
     return utenteLoggato.email?.slice(0, 2).toUpperCase() || "CN";
   }, [utenteLoggato]);
+
+  const statisticheAdmin = useMemo(() => {
+    const stats = { 
+      inAttesa: 0, 
+      inLavorazione: 0, 
+      pronti: 0, 
+      completati: 0, 
+      incassoTotale: 0, 
+      incassoVerificato: 0, 
+      totaleArticoliVenduti: 0 
+    };
+
+    const clientiInAttesa = new Set();
+    const clientiInLavorazione = new Set();
+    const clientiPronti = new Set();
+    const clientiCompletati = new Set();
+
+    (tuttiGliOrdiniAdmin || []).forEach(o => {
+      const email = o.email_acquirente || o.utente_id || 'anonimo';
+      if (o.stato_pagamento === 'In attesa') clientiInAttesa.add(email);
+      if (o.stato_pagamento === 'In lavorazione') clientiInLavorazione.add(email);
+      if (o.stato_pagamento === 'Pronto per il ritiro') clientiPronti.add(email);
+      if (o.stato_pagamento === 'Completato') clientiCompletati.add(email);
+
+      const val = Number(o.prezzo || o.totale || 0);
+      stats.incassoTotale += val;
+      if (o.pagato) {
+        stats.incassoVerificato += val;
+        stats.totaleArticoliVenduti += (Array.isArray(o.articoli) && o.articoli.length > 0 ? o.articoli.length : 1);
+      }
+    });
+
+    stats.inAttesa = clientiInAttesa.size;
+    stats.inLavorazione = clientiInLavorazione.size;
+    stats.pronti = clientiPronti.size;
+    stats.completati = clientiCompletati.size;
+    return stats;
+  }, [tuttiGliOrdiniAdmin]);
+
+  const haSollecitoAttivo = useMemo(() => {
+    return notificheSettoreCorrente.some(n => n.tipo === 'sollecito' || Boolean(n.linkPaypal));
+  }, [notificheSettoreCorrente]);
+
+  // ========================================================
+  // LOGICA SOLLECITO CENTRALIZZATA & SINCRONIZZATA
+  // ========================================================
+
+  const calcolaDebitoTotaleUtente = useCallback(async (emailUtente, utenteId, settore) => {
+    let tot = 0;
+    const targetEmail = (emailUtente || '').toLowerCase().trim();
+
+    try {
+      const qOrdini = query(
+        collection(db, "ordini"),
+        where("disciplina", "==", settore)
+      );
+      const snap = await getDocs(qOrdini);
+
+      snap.forEach(docSnap => {
+        const o = docSnap.data();
+        if (o.stato_pagamento === "Annullato") return;
+
+        const matchEmail = targetEmail && (o.email_acquirente || '').toLowerCase().trim() === targetEmail;
+        const matchUid = utenteId && o.utente_id === utenteId;
+
+        if (matchEmail || matchUid) {
+          if (!o.pagato) {
+            const lista = Array.isArray(o.articoli) && o.articoli.length > 0 ? o.articoli : [o];
+            lista.forEach(capo => {
+              tot += Number(capo.prezzo || o.prezzo || o.totale || 0);
+            });
+          }
+        }
+      });
+    } catch (err) {
+      console.error("Errore calcolo debito utente:", err);
+    }
+
+    return tot;
+  }, []);
+
+  const aggiornaNotificaSollecitoUtente = useCallback(async (uidTarget, emailTarget, settore, forzato = false) => {
+    let uid = uidTarget;
+
+    if (!uid && emailTarget) {
+      const emailPulita = emailTarget.trim();
+      const qUser = query(collection(db, "utenti"), where("email", "==", emailPulita));
+      let snap = await getDocs(qUser);
+
+      if (snap.empty) {
+        const qUserLower = query(collection(db, "utenti"), where("email", "==", emailPulita.toLowerCase()));
+        snap = await getDocs(qUserLower);
+      }
+
+      if (!snap.empty) {
+        uid = snap.docs[0].id;
+      }
+    }
+
+    if (!uid) {
+      console.warn("Impossibile trovare UID utente per sollecito:", { uidTarget, emailTarget });
+      return;
+    }
+
+    const notifRef = doc(db, "utenti", uid, "notifiche", `sollecito_${settore.toLowerCase()}`);
+    const debito = await calcolaDebitoTotaleUtente(emailTarget, uid, settore);
+
+    if (debito <= 0) {
+      await deleteDoc(notifRef).catch(() => {});
+      return;
+    }
+
+    if (!forzato) {
+      const snapNotif = await getDoc(notifRef);
+      if (!snapNotif.exists()) {
+        return;
+      }
+    }
+
+    // VERIFICA SE IL DEBITO/IMPORTO È MAGGIORE DI ZERO PRIMA DI INVIARE IL SOLLECITO
+    const linkPaypal = debito > 0 
+      ? `${PAYPAL_LINKS[settore] || PAYPAL_LINKS.pallanuoto}/${debito.toFixed(2)}` 
+      : (PAYPAL_LINKS[settore] || PAYPAL_LINKS.pallanuoto);
+
+    await setDoc(notifRef, {
+      tipo: 'sollecito',
+      titolo: 'Avviso di Pagamento Saldo',
+      messaggio: `Risulta un saldo pendente di €${debito.toFixed(2)} per le forniture di ${settore.toUpperCase()}.`,
+      totaleDovuto: debito,
+      disciplina: settore,
+      linkPaypal: linkPaypal,
+      letto: false,
+      creato_il: serverTimestamp(),
+      aggiornato_il: serverTimestamp()
+    }, { merge: true });
+  }, [calcolaDebitoTotaleUtente]);
+
+  const inviaSollecitoSingolo = useCallback(async (gruppoCliente) => {
+    if (!gruppoCliente || gruppoCliente.totaleDovuto <= 0) return;
+
+    try {
+      const targetUid = gruppoCliente.ordini[0]?.utente_id || null;
+      await aggiornaNotificaSollecitoUtente(targetUid, gruppoCliente.email, settoreAttivo, true);
+
+      const capiNonPagati = [];
+      gruppoCliente.ordini.forEach(o => {
+        if (!o.pagato) {
+          const lista = Array.isArray(o.articoli) && o.articoli.length > 0 ? o.articoli : [o];
+          lista.forEach(c => {
+            capiNonPagati.push(`• ${c.nomeProdotto} (${c.atleta || 'Profilo'}) - €${Number(c.prezzo || 0).toFixed(2)}`);
+          });
+        }
+      });
+
+      const importoStr = `€${Number(gruppoCliente.totaleDovuto).toFixed(2)}`;
+      
+      // VERIFICA SE IL DEBITO È MAGGIORE DI ZERO E GENERA IL LINK CON L'IMPORTO ANNESSO
+      const linkPaypal = gruppoCliente.totaleDovuto > 0 
+        ? `${linkPaypalSettore}/${Number(gruppoCliente.totaleDovuto).toFixed(2)}` 
+        : linkPaypalSettore;
+
+      const oggetto = encodeURIComponent(`Sollecito Saldo Forniture ${settoreAttivo.toUpperCase()} - Circolo Nuoto Lucca`);
+      const corpo = encodeURIComponent(
+`Gentile ${gruppoCliente.acquirente},
+
+ti ricordiamo che risulta ancora da saldare il materiale sportivo per il settore ${settoreAttivo.toUpperCase()}:
+
+${capiNonPagati.join('\n')}
+
+Totale complessivo da saldare: ${importoStr}
+
+Puoi effettuare il pagamento direttamente al seguente link PayPal ufficiale:
+${linkPaypal}
+
+Ti chiediamo cortesemente di indicare nella causale il nome dell'atleta o dei profili a cui sono intestati i capi.
+
+Cordiali saluti,
+Circolo Nuoto Lucca`
+      );
+
+      window.location.href = `mailto:${gruppoCliente.email}?subject=${oggetto}&body=${corpo}`;
+      mostraMessaggio("Sollecito Inviato", `Email aperta e notifica in-app recapitata (${importoStr}).`, "success");
+    } catch (err) {
+      mostraMessaggio("Errore", "Impossibile preparare il sollecito: " + err.message, "error");
+    }
+  }, [aggiornaNotificaSollecitoUtente, settoreAttivo, linkPaypalSettore, mostraMessaggio]);
+
+  const inviaSollecitoMassivo = useCallback(() => {
+    const clientiMorosi = ordiniAdminRaggruppatiPerUtente.filter(g => g.totaleDovuto > 0);
+    if (clientiMorosi.length === 0) {
+      mostraMessaggio("Nessun Debito", "Tutti gli ordini risultano saldati.", "info");
+      return;
+    }
+
+    chiediConferma(
+      "Sollecito Massivo In-App",
+      `Inviare una notifica in-app con il saldo aggiornato a tutti i ${clientiMorosi.length} clienti con ordini pendenti?`,
+      async () => {
+        try {
+          let inviati = 0;
+          for (const cliente of clientiMorosi) {
+            const targetUid = cliente.ordini[0]?.utente_id || null;
+            await aggiornaNotificaSollecitoUtente(targetUid, cliente.email, settoreAttivo, true);
+            inviati++;
+          }
+          mostraMessaggio("Solleciti Inviati", `Notifica in-app recapitata a ${inviati} account.`, "success");
+        } catch (err) {
+          mostraMessaggio("Errore", err.message, "error");
+        }
+      },
+      "Invia a Tutti"
+    );
+  }, [ordiniAdminRaggruppatiPerUtente, settoreAttivo, aggiornaNotificaSollecitoUtente, chiediConferma, mostraMessaggio]);
+
+  const handleAggiornaStatoOrdineAdmin = useCallback(async (ordId, dataAggiornamento) => {
+    try {
+      const ordTarget = tuttiGliOrdiniAdmin.find(o => o.id === ordId);
+      let payload = {
+        ...dataAggiornamento,
+        aggiornato_il: serverTimestamp()
+      };
+
+      if (dataAggiornamento.stato_pagamento && dataAggiornamento.stato_pagamento !== "Completato") {
+        payload.completato = false;
+
+        if (ordTarget?.articoli && ordTarget.articoli.length > 0) {
+          payload.articoli = ordTarget.articoli.map(art => ({
+            ...art,
+            completato: false
+          }));
+        }
+      }
+
+      if (dataAggiornamento.stato_pagamento === "Completato") {
+        payload.completato = true;
+
+        if (ordTarget?.articoli && ordTarget.articoli.length > 0) {
+          payload.articoli = ordTarget.articoli.map(art => ({
+            ...art,
+            completato: true
+          }));
+        }
+      }
+
+      await updateDoc(doc(db, "ordini", ordId), payload);
+
+      if (dataAggiornamento.pagato !== undefined) {
+        if (ordTarget) {
+          const email = ordTarget.email_acquirente;
+          const uid = ordTarget.utente_id;
+          const settore = ordTarget.disciplina || settoreAttivo;
+          await aggiornaNotificaSollecitoUtente(uid, email, settore, false);
+        }
+      }
+    } catch (err) {
+      mostraMessaggio("Errore", "Impossibile aggiornare lo stato dell'ordine: " + err.message, "error");
+    }
+  }, [tuttiGliOrdiniAdmin, settoreAttivo, aggiornaNotificaSollecitoUtente, mostraMessaggio]);
+
+  const handleToggleCompletatoArticolo = useCallback(async (idOrdine, idUnivoco) => {
+    try {
+      const ordTarget = tuttiGliOrdiniAdmin.find(o => o.id === idOrdine);
+      if (!ordTarget) return;
+
+      const listaArticoli = Array.isArray(ordTarget.articoli) && ordTarget.articoli.length > 0 
+        ? ordTarget.articoli 
+        : [ordTarget];
+
+      const articoliAggiornati = listaArticoli.map(art => {
+        const matchUnivoco = (art.idUnivoco || ordTarget.id) === idUnivoco;
+        if (matchUnivoco) {
+          return { ...art, completato: !art.completato };
+        }
+        return art;
+      });
+
+      const tuttiCompletati = articoliAggiornati.every(a => a.completato);
+      const nuovoStatoOrdine = tuttiCompletati ? "Completato" : "Pronto per il ritiro";
+
+      await updateDoc(doc(db, "ordini", idOrdine), {
+        articoli: articoliAggiornati,
+        completato: tuttiCompletati,
+        stato_pagamento: nuovoStatoOrdine,
+        aggiornato_il: serverTimestamp()
+      });
+
+      mostraMessaggio("Aggiornato", "Stato consegna aggiornato.", "success");
+    } catch (err) {
+      console.error("Errore toggle completato:", err);
+      mostraMessaggio("Errore", "Impossibile aggiornare la consegna: " + err.message, "error");
+    }
+  }, [tuttiGliOrdiniAdmin, mostraMessaggio]);
+
+  const handleConfermaPagamentoNotifica = useCallback(async (notifica) => {
+    if (!utenteLoggato || !notifica?.id) return;
+    try {
+      await deleteDoc(doc(db, "utenti", utenteLoggato.id, "notifiche", notifica.id));
+    } catch (err) {
+      console.error("Errore eliminazione sollecito:", err);
+    }
+  }, [utenteLoggato]);
+
+  const handleRichiestaAnnullaOrdine = useCallback((ord) => {
+    const nomeCapo = ord.nomeProdotto || (ord.articoli && ord.articoli[0]?.nomeProdotto) || "questo ordine";
+    const nomeAtleta = ord.atleta || (ord.articoli && ord.articoli[0]?.atleta) || "cliente";
+
+    chiediConferma(
+      "CONFERMA ANNULLAMENTO",
+      `Sei sicuro di voler annullare definitivamente l'ordine "${nomeCapo}" intestato a ${nomeAtleta}? Questa operazione è irreversibile.`,
+      async () => {
+        try {
+          await deleteDoc(doc(db, "ordini", ord.id));
+          mostraMessaggio("Ordine Annullato", "L'ordine è stato rimosso definitivamente.", "info");
+        } catch (err) {
+          mostraMessaggio("Errore", "Impossibile annullare l'ordine: " + err.message, "error");
+        }
+      },
+      "Annulla Ordine"
+    );
+  }, [chiediConferma, mostraMessaggio]);
+
+  const handleRichiestaCancellaArticolo = useCallback((capo) => {
+    const targetId = capo.ordinePadreId || capo.idOrdinePadre || capo.id;
+    const nomeArt = capo.nomeProdotto || "questo capo";
+
+    chiediConferma(
+      "ELIMINA ARTICOLO",
+      `Confermi l'eliminazione definitiva del capo "${nomeArt}" dall'elenco forniture?`,
+      async () => {
+        try {
+          await deleteDoc(doc(db, "ordini", targetId));
+          mostraMessaggio("Articolo Rimosso", "Il capo è stato eliminato con successo.", "info");
+        } catch (err) {
+          mostraMessaggio("Errore: Errore durante la cancellazione: " + err.message, "error");
+        }
+      },
+      "Elimina Definitivamente"
+    );
+  }, [chiediConferma, mostraMessaggio]);
 
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50">
-        <div className="w-9 h-9 rounded-full border-3 border-[#002b80] border-t-transparent animate-spin mb-3"></div>
-        <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Caricamento in corso...</span>
+        <div className="w-10 h-10 rounded-full border-3 border-[#002b80] border-t-transparent animate-spin mb-3.5"></div>
+        <span className="text-xs sm:text-sm font-bold text-slate-400 uppercase tracking-widest">Caricamento in corso...</span>
       </div>
     );
   }
 
   if (!utenteLoggato) {
     return (
-      <div className="font-sans antialiased min-h-screen bg-slate-50">
-        <Auth 
-          onLoginSuccess={(datiUtente) => {
-            setAuthError(null);
-            setUtenteLoggato(datiUtente);
-          }} 
-          externalError={authError}
-          onClearExternalError={() => setAuthError(null)}
-          onSettoreChange={() => setAuthError(null)}
-        />
-      </div>
+      <Auth 
+        onLoginSuccess={(datiUtente) => {
+          setAuthError(null);
+          setUtenteLoggato(datiUtente);
+        }} 
+        externalError={authError}
+        onClearExternalError={() => setAuthError(null)}
+        onSettoreChange={cambiaSettore}
+      />
     );
   }
 
   return (
-    <div className="min-h-screen font-sans text-slate-900 antialiased bg-slate-50/60">
+    <div className="min-h-screen font-sans text-slate-900 antialiased bg-slate-50/60 flex flex-col">
       
+      {/* Toast Notification in-app */}
+      <ToastNotification toast={toast} onClose={() => setToast(null)} />
+      
+      {/* Modali globali */}
       <CustomModal 
         modalConfig={modalConfig}
         onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
+      />
+
+      <ModalCarrello 
+        isOpen={mostraModalCarrello}
+        onClose={() => setMostraModalCarrello(false)}
+        carrello={carrello}
+        totaleCarrello={totaleCarrello}
+        onRimuoviDalCarrello={rimuoviDalCarrello}
+        onAggiornaCarrelloItem={aggiornaCarrelloItem}
+        onCheckout={gestisciCheckout}
+        onChiediConferma={chiediConferma}
+        listaAtleti={atletiSettoreAttivo}
+        prodotti={prodotti}
+        isCheckout={isCheckout}
+        onZoomFoto={(src, alt) => setZoomImage({ src, alt })}
+      />
+
+      <ModalGuidaPrimoAccesso 
+        isOpen={mostraGuidaPrimoAccesso}
+        onClose={chiudiGuidaPrimoAccesso}
       />
 
       {mostraModalProfilo && (
@@ -1144,52 +1558,71 @@ export default function App() {
       {ordineInModifica && (
         <ModalModificaOrdine 
           ordine={ordineInModifica}
-          listaAtleti={utenteLoggato.atleti || []}
+          listaAtleti={atletiSettoreAttivo}
           prodotti={prodotti}
           onClose={() => setOrdineInModifica(null)}
-          onSalva={salvaCampiModificatiOrdine}
+          onSalva={async (ordId, nuoviArticoli) => {
+            const nuovoTotale = nuoviArticoli.reduce((acc, a) => acc + Number(a.prezzo || 0), 0);
+            await updateDoc(doc(db, "ordini", ordId), { 
+              articoli: nuoviArticoli,
+              prezzo: nuovoTotale,
+              totale: nuovoTotale,
+              aggiornato_il: serverTimestamp()
+            });
+            setOrdineInModifica(null);
+            mostraMessaggio("Modificato", "Fornitura aggiornata con successo.", "success");
+          }}
         />
       )}
 
+      {/* NAVBAR STICKY DIRETTA (senza div wrapper fixed che causava la sovrapposizione) */}
       <Navbar 
-        settoreUtente={settoreUtente}
+        settoreUtente={settoreAttivo}
+        onCambiaSettore={cambiaSettore}
+        mostraSelettoreSettore={!adminRuolo}
+        sollecitiPerSettore={sollecitiPerSettore}
         carrelloCount={carrello.length}
         totaleCarrello={totaleCarrello}
-        isUserAdmin={utenteLoggato.is_admin}
+        isUserAdmin={isUserAdminNelSettore}
         inizialiUtente={inizialiUtente}
-        utenteLoggato={utenteLoggato}
         adminTab={adminTab}
         onSetAdminTab={setAdminTab}
+        onApriCarrello={() => setMostraModalCarrello(true)}
         onApriProfilo={() => setMostraModalProfilo(true)}
-        onLogout={gestisciLogout}
+        onLogout={handleLogout}
       />
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-        {!utenteLoggato.is_admin ? (
+      {/* MAIN CON PADDING NATURALE: la navbar sticky riserva autonomamente lo spazio */}
+      <main className="max-w-7xl w-full mx-auto px-3.5 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-8 flex-1">
+        {!isUserAdminNelSettore ? (
           <>
             <BannerNotifiche 
-              notifiche={notificheUtente}
-              onEliminaNotifica={eliminaNotificaUtente}
+              notifiche={notificheSettoreCorrente}
+              onConfermaPagamento={handleConfermaPagamentoNotifica}
             />
             <NegozioUtente 
+              key={settoreAttivo}
               utenteLoggato={utenteLoggato}
               prodotti={prodotti}
               carrello={carrello}
               totaleCarrello={totaleCarrello}
               ordiniUtente={ordiniUtente}
               isCheckout={isCheckout}
-              categorieAtleti={CATEGORIE_ATLETI}
-              settoreUtente={settoreUtente}
+              categorieAtleti={categorieCorrenti}
+              settoreUtente={settoreAttivo}
               linkPaypal={linkPaypalSettore}
+              haSollecitoAttivo={haSollecitoAttivo}
+              listaAtleti={atletiSettoreAttivo}
               onAggiungiAlCarrello={aggiungiAlCarrello}
               onRimuoviDalCarrello={rimuoviDalCarrello}
               onCheckout={gestisciCheckout}
               onZoomFoto={(src, alt) => setZoomImage({ src, alt })}
               onAggiungiAtleta={aggiungiAtletaFamiglia}
+              onModificaAtleta={modificaAtletaFamiglia}
               onRimuoviAtleta={rimuoviAtletaFamiglia}
               onApriModificaOrdine={setOrdineInModifica}
-              onAnnullaOrdine={annullaInteroOrdine}
-              onCancellaArticolo={cancellaArticoloDaOrdine}
+              onAnnullaOrdine={handleRichiestaAnnullaOrdine}
+              onCancellaArticolo={handleRichiestaCancellaArticolo}
             />
           </>
         ) : (
@@ -1202,14 +1635,19 @@ export default function App() {
             filtroStato={filtroStatoAdmin}
             onSetFiltroStato={setFiltroStatoAdmin}
             ordiniRaggruppati={ordiniAdminRaggruppatiPerUtente}
+            tuttiGliOrdini={tuttiGliOrdiniAdmin}
             ordiniInAttesaCount={ordiniInAttesaCount}
             invioProduzioneInCorso={invioProduzioneInCorso}
             onInviaProduzione={mandaInLavorazioneConEmail}
+            onImpostaProntiRitiro={() => {}}
             onEsportaCsv={esportaCsvAdmin}
-            onAggiornaOrdine={aggiornaOrdineAdmin}
+            onAggiornaOrdine={handleAggiornaStatoOrdineAdmin}
+            onToggleCompletatoArticolo={handleToggleCompletatoArticolo}
             onApriModificaOrdine={setOrdineInModifica}
-            onAnnullaOrdine={annullaInteroOrdine}
-            onCancellaArticolo={cancellaArticoloDaOrdine}
+            onAnnullaOrdine={handleRichiestaAnnullaOrdine}
+            onCancellaArticolo={handleRichiestaCancellaArticolo}
+            onInviaSollecitoMassivo={inviaSollecitoMassivo}
+            onInviaSollecitoSingolo={inviaSollecitoSingolo}
             nuovoProd={nuovoProd}
             onSetNuovoProd={setNuovoProd}
             fileInputRef={fileInputRef}
@@ -1223,9 +1661,8 @@ export default function App() {
             onEliminaProdotto={eliminaProdottoAdmin}
             onModificaProdotto={modificaProdottoAdmin}
             onToggleVisibilitaProdotto={toggleVisibilitaProdottoAdmin}
-            onInviaSollecitoMassivo={inviaSollecitoMassivo}
-            onInviaSollecitoSingolo={inviaSollecitoSingolo}
-            settoreUtente={settoreUtente}
+            settoreUtente={settoreAttivo}
+            categorieSettore={categorieCorrenti}
             onZoomFoto={(src, alt) => setZoomImage({ src, alt })}
           />
         )}

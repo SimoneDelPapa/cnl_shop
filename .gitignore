@@ -1,11 +1,48 @@
-# Backend
-backend/.env
-backend/__pycache__/
-backend/venv/
-backend/.venv
-backend/*.pyc
+# ==========================================
+# File di sistema e IDE
+# ==========================================
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
 
-# Frontend
+# ==========================================
+# Backend (Python / FastAPI)
+# ==========================================
+backend/.env
+backend/.env.*
+!backend/.env.example
+
+# Byte-compiled / cache (ovunque si trovino dentro backend/)
+backend/**/__pycache__/
+backend/**/*.py[cod]
+backend/*$py.class
+
+# Ambienti virtuali
+backend/venv/
+backend/.venv/
+backend/env/
+
+# Database locali e test (se presenti)
+backend/*.sqlite3
+backend/*.db
+backend/.pytest_cache/
+
+# ==========================================
+# Frontend (Node / Vite / React)
+# ==========================================
 frontend/node_modules/
 frontend/dist/
+frontend/build/
+
+# Variabili d'ambiente Vite/React
 frontend/.env.local
+frontend/.env.*.local
+frontend/.env
+!frontend/.env.example
+
+# Log di pacchetti
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
