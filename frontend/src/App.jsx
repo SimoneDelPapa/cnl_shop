@@ -1333,9 +1333,11 @@ ASD Circolo Nuoto Lucca`
         const matchUid = utenteId && o.utente_id === utenteId;
 
         if (matchEmail || matchUid) {
+          // Se l'ordine non è globalmente pagato, controlliamo i singoli capi o il totale dell'ordine
           if (!o.pagato) {
             const lista = Array.isArray(o.articoli) && o.articoli.length > 0 ? o.articoli : [o];
             lista.forEach(capo => {
+              // Sommiamo solo i capi che non risultano singoli o globalmente non saldati
               tot += Number(capo.prezzo || o.prezzo || o.totale || 0);
             });
           }
@@ -1348,7 +1350,7 @@ ASD Circolo Nuoto Lucca`
     return tot;
   }, []);
 
-  const aggiornaNotificaSollecitoUtente = useCallback(async (uidTarget, emailTarget, settore, forzato = false) => {
+  const aggiornaNotificaSollecitoUtente = useCallback(async (uidTarget, emailTarget, settore, creaSeNonEsiste = false) => {
     let uid = uidTarget;
 
     if (!uid && emailTarget) {
@@ -1366,29 +1368,26 @@ ASD Circolo Nuoto Lucca`
       }
     }
 
-    if (!uid) {
-      console.warn("Impossibile trovare UID utente per sollecito:", { uidTarget, emailTarget });
-      return;
-    }
+    if (!uid) return;
 
     const notifRef = doc(db, "utenti", uid, "notifiche", `sollecito_${settore.toLowerCase()}`);
     const debito = await calcolaDebitoTotaleUtente(emailTarget, uid, settore);
 
+    // Se il debito è azzerato, rimuoviamo la notifica
     if (debito <= 0) {
       await deleteDoc(notifRef).catch(() => {});
       return;
     }
 
-    if (!forzato) {
-      const snapNotif = await getDoc(notifRef);
-      if (!snapNotif.exists()) {
-        return;
-      }
+    const snapNotif = await getDoc(notifRef);
+
+    // Se la notifica non esiste e l'admin NON ha cliccato esplicitamente su "Sollecita" (creaSeNonEsiste = false),
+    // non creiamo il sollecito in-app dal nulla (evitando che appaia da solo spuntando "Saldato").
+    if (!snapNotif.exists() && !creaSeNonEsiste) {
+      return;
     }
 
-    const linkPaypal = debito > 0 
-      ? `${PAYPAL_LINKS[settore] || PAYPAL_LINKS.pallanuoto}/${debito.toFixed(2)}` 
-      : (PAYPAL_LINKS[settore] || PAYPAL_LINKS.pallanuoto);
+    const linkPaypal = `${PAYPAL_LINKS[settore] || PAYPAL_LINKS.pallanuoto}/${debito.toFixed(2)}`;
 
     await setDoc(notifRef, {
       tipo: 'sollecito',
@@ -1409,7 +1408,7 @@ ASD Circolo Nuoto Lucca`
     try {
       const targetUid = gruppoCliente.ordini[0]?.utente_id || null;
       await aggiornaNotificaSollecitoUtente(targetUid, gruppoCliente.email, settoreAttivo, true);
-
+      
       const capiNonPagati = [];
       gruppoCliente.ordini.forEach(o => {
         if (!o.pagato) {
@@ -1511,12 +1510,12 @@ Circolo Nuoto Lucca`
 
       await updateDoc(doc(db, "ordini", ordId), payload);
 
-      if (dataAggiornamento.pagato !== undefined) {
+      if (dataAggiornamento.pagato !== undefined || dataAggiornamento.stato_pagamento !== undefined) {
         if (ordTarget) {
           const email = ordTarget.email_acquirente;
           const uid = ordTarget.utente_id;
           const settore = ordTarget.disciplina || settoreAttivo;
-          await aggiornaNotificaSollecitoUtente(uid, email, settore, false);
+          await aggiornaNotificaSollecitoUtente(uid, email, settore);
         }
       }
     } catch (err) {

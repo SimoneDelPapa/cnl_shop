@@ -1483,14 +1483,15 @@ export default function PannelloAdmin({
                         <button
                           type="button"
                           onClick={() => onToggleVisibilitaProdotto(p.id, !visibile)}
-                          className={`h-9 px-3 text-xs sm:text-sm font-bold border rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer ${
+                          className={`h-9 w-9 sm:w-auto sm:px-3 text-xs sm:text-sm font-bold border rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer shrink-0 ${
                             visibile 
                               ? 'text-slate-600 hover:bg-slate-200/60 border-slate-200' 
                               : 'text-amber-800 bg-amber-100/70 hover:bg-amber-200/70 border-amber-300'
                           }`}
+                          title={visibile ? "Nascondi articolo" : "Mostra articolo"}
                         >
                           <FontAwesomeIcon icon={visibile ? faEyeSlash : faEye} />
-                          <span>{visibile ? "Nascondi" : "Mostra"}</span>
+                          <span className="hidden sm:inline">{visibile ? "Nascondi" : "Mostra"}</span>
                         </button>
 
                         <button 
