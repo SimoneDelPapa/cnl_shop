@@ -3,7 +3,9 @@ import { auth, db } from './firebase';
 import { 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
-  sendPasswordResetEmail 
+  sendPasswordResetEmail,
+  sendEmailVerification,
+  signOut
 } from 'firebase/auth';
 import { 
   doc, 
@@ -27,7 +29,8 @@ import {
   faShirt,
   faTag,
   faEye,
-  faEyeSlash
+  faEyeSlash,
+  faPaperPlane
 } from '@fortawesome/free-solid-svg-icons';
 import LightboxModal from './components/LightboxModal';
 
@@ -47,6 +50,7 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
   const [loading, setLoading] = useState(false);
   const [messaggioInfo, setMessaggioInfo] = useState('');
   const [erroreLocale, setErroreLocale] = useState('');
+  const [mostraTastoReinviaVerifica, setMostraTastoReinviaVerifica] = useState(false);
 
   const [prodottiCarosello, setProdottiCarosello] = useState([]);
   const [slideCorrente, setSlideCorrente] = useState(0);
@@ -62,14 +66,12 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
     const originalBodyOverflow = document.body.style.overflow;
     const originalHtmlOverflow = document.documentElement.style.overflow;
 
-    // Blocca lo scorrimento sia su desktop che su iOS
     document.documentElement.style.overflow = 'hidden';
     document.body.style.position = 'fixed';
     document.body.style.top = `-${scrollY}px`;
     document.body.style.width = '100%';
     document.body.style.overflow = 'hidden';
 
-    // Blocca il rubber-banding nativo di iOS
     const preventTouch = (e) => {
       if (e.target.closest('.overflow-y-auto')) return;
       e.preventDefault();
@@ -127,7 +129,15 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
     setLoading(true);
     setErroreLocale('');
     setMessaggioInfo('');
+    setMostraTastoReinviaVerifica(false);
     if (onClearExternalError) onClearExternalError();
+
+    // Validazione lunghezza password (8-16 caratteri)
+    if (password.length < 8 || password.length > 16) {
+      setErroreLocale("La password deve contenere tra gli 8 e i 16 caratteri.");
+      setLoading(false);
+      return;
+    }
 
     try {
       if (isRegistrazione) {
@@ -153,10 +163,26 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
         };
 
         await setDoc(userDocRef, datiUtente);
-        sessionStorage.setItem("cnl_settore_richiesto", settoreCarosello);
-        onLoginSuccess({ id: cred.user.uid, ...datiUtente });
+
+        // Invia mail di verifica e disconnetti istantaneamente
+        await sendEmailVerification(cred.user);
+        await signOut(auth);
+
+        setIsRegistrazione(false);
+        setPassword('');
+        setMessaggioInfo(`Abbiamo inviato un'email di conferma a ${email.trim()}. Controlla la posta in arrivo o la cartella Spam per confermare l'account.`);
       } else {
         const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+
+        // Controllo se l'email è stata verificata
+        if (!cred.user.emailVerified) {
+          await signOut(auth);
+          setErroreLocale("Email non ancora verificata. Controlla la posta in arrivo o la cartella Spam per confermare l'account.");
+          setMostraTastoReinviaVerifica(true);
+          setLoading(false);
+          return;
+        }
+
         const userDocRef = doc(db, "utenti", cred.user.uid);
         const snap = await getDoc(userDocRef);
 
@@ -168,45 +194,97 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
           sessionStorage.setItem("cnl_settore_richiesto", settoreCarosello);
           onLoginSuccess({ id: cred.user.uid, ...dati });
         } else {
-          const legacyKey = `${cred.user.uid}_${settoreCarosello}`;
-          const legSnap = await getDoc(doc(db, "utenti", legacyKey));
-          if (legSnap.exists()) {
-            const legData = legSnap.data();
-            sessionStorage.setItem("cnl_settore_richiesto", settoreCarosello);
-            onLoginSuccess({ id: cred.user.uid, ...legData });
-          } else {
-            setErroreLocale("Account non trovato. Registrati per continuare.");
-          }
+          setErroreLocale("Account non trovato. Registrati per continuare.");
         }
       }
     } catch (err) {
-      if (err.code === 'auth/email-already-in-use') {
-        setErroreLocale("Email già registrata. Effettua l'accesso.");
-      } else if (err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
-        setErroreLocale("Email o password non corrette.");
-      } else if (err.code === 'auth/weak-password') {
-        setErroreLocale("La password deve contenere almeno 6 caratteri.");
-      } else {
-        setErroreLocale(err.message || "Impossibile accedere.");
+      console.error("Errore autenticazione:", err);
+
+      switch (err.code) {
+        case 'auth/user-not-found':
+          setErroreLocale("Nessun account trovato con questa email. Registrati per iniziare.");
+          break;
+        case 'auth/invalid-credential':
+        case 'auth/wrong-password':
+          setErroreLocale(
+            isRegistrazione 
+              ? "Dati di registrazione non validi." 
+              : "Email o password non corrette, oppure l'account non esiste."
+          );
+          break;
+        case 'auth/email-already-in-use':
+          setErroreLocale("Questa email risulta già registrata. Effettua l'accesso.");
+          break;
+        case 'auth/invalid-email':
+          setErroreLocale("Il formato dell'indirizzo email non è valido.");
+          break;
+        case 'auth/weak-password':
+          setErroreLocale("La password scelta è troppo debole. Inserisci tra 8 e 16 caratteri.");
+          break;
+        case 'auth/too-many-requests':
+          setErroreLocale("Troppi tentativi consecutivi falliti. Riprova tra qualche minuto per sicurezza.");
+          break;
+        case 'auth/network-request-failed':
+          setErroreLocale("Problema di connessione a internet. Controlla la rete e riprova.");
+          break;
+        case 'auth/user-disabled':
+          setErroreLocale("Questo account è stato disabilitato. Contatta l'amministrazione.");
+          break;
+        default:
+          setErroreLocale("Si è verificato un errore durante l'operazione. Riprova più tardi.");
+          break;
       }
     } finally {
       setLoading(false);
     }
   };
 
-  const recuperaPassword = () => {
-    if (!email.trim()) {
-      setErroreLocale("Inserisci l'email per reimpostare la password.");
+  const reinviaEmailVerifica = async () => {
+    if (!email.trim() || !password) {
+      setErroreLocale("Inserisci email e password per poter reinviare l'email di verifica.");
       return;
     }
-    sendPasswordResetEmail(auth, email.trim())
-      .then(() => {
-        setMessaggioInfo("Email di ripristino inviata.");
-        setErroreLocale('');
-      })
-      .catch((err) => {
-        setErroreLocale("Errore: " + err.message);
-      });
+    setLoading(true);
+    try {
+      const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
+      await sendEmailVerification(cred.user);
+      await signOut(auth);
+      setMessaggioInfo(`Email di verifica inviata nuovamente a ${email.trim()}.`);
+      setErroreLocale('');
+      setMostraTastoReinviaVerifica(false);
+    } catch (err) {
+      setErroreLocale("Impossibile reinviare l'email: " + (err.message || "riprova più tardi."));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const recuperaPassword = async () => {
+    const emailPulita = email.trim().toLowerCase();
+    if (!emailPulita) {
+      setErroreLocale("Inserisci l'email per reimpostare la password.");
+      setMessaggioInfo('');
+      return;
+    }
+
+    setLoading(true);
+    setErroreLocale('');
+    setMessaggioInfo('');
+
+    try {
+      await sendPasswordResetEmail(auth, emailPulita);
+      setMessaggioInfo("Email di ripristino inviata. Controlla anche nella cartella Spam.");
+    } catch (err) {
+      if (err.code === 'auth/user-not-found') {
+        setErroreLocale("Nessun account collegato a questa email.");
+      } else if (err.code === 'auth/invalid-email') {
+        setErroreLocale("Formato email non valido.");
+      } else {
+        setErroreLocale("Errore: " + (err.message || "impossibile inviare l'email."));
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   const erroreDaMostrare = externalError || erroreLocale;
@@ -216,7 +294,7 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
   return (
     <div className="w-full max-w-full overflow-x-hidden min-h-[100dvh] lg:h-[100dvh] bg-white flex flex-col lg:grid lg:grid-cols-12 pt-[env(safe-area-inset-top,0.5rem)] lg:pt-0">
       
-      {/* ZOOM LIGHTBOX ANCHE IN LOGIN */}
+      {/* ZOOM LIGHTBOX */}
       {zoomImage && (
         <LightboxModal 
           src={zoomImage.src} 
@@ -226,27 +304,27 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
       )}
 
       {/* 1. SEZIONE FORM AUTENTICAZIONE */}
-      <div className="w-full max-w-full lg:col-span-7 flex flex-col justify-start lg:justify-between px-5 py-4 sm:px-10 sm:py-8 lg:p-12 xl:p-16 bg-white z-10 lg:overflow-y-auto box-border">
+      <div className="w-full max-w-full lg:col-span-5 xl:col-span-4 flex flex-col justify-start lg:justify-between px-5 py-5 sm:px-10 sm:py-8 lg:p-8 xl:p-12 bg-white z-10 lg:overflow-y-auto box-border">
         
-        {/* BRAND CNL SHOP INGRANDITO E IN RISALTO */}
-        <div className="flex items-center gap-3.5 sm:gap-4 shrink-0 pt-2 pb-4 mb-2 sm:mb-4">
+        {/* BRAND CNL SHOP */}
+        <div className="flex items-center gap-3.5 sm:gap-4 shrink-0 pt-1 pb-3 mb-2 sm:mb-3">
           <img 
             src="/cnl_shop.png" 
             alt="CNL Shop" 
-            className="w-14 h-14 sm:w-16 sm:h-16 object-contain shrink-0 drop-shadow-md select-none pointer-events-none rounded-2xl"
+            className="w-12 h-12 sm:w-14 sm:h-14 object-contain shrink-0 drop-shadow-md select-none pointer-events-none rounded-2xl"
           />
           <div className="flex flex-col justify-center min-w-0">
-            <span className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight leading-none">
+            <span className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight leading-none">
               CNL Shop
             </span>
-            <span className="text-xs sm:text-sm font-extrabold text-[#002b80] uppercase tracking-widest mt-1 block">
+            <span className="text-[11px] sm:text-xs font-extrabold text-[#002b80] uppercase tracking-widest mt-1 block">
               Circolo Nuoto Lucca
             </span>
           </div>
         </div>
 
         {/* Form centrale */}
-        <div className="w-full max-w-sm sm:max-w-md mx-auto my-4 lg:my-auto space-y-4 box-border">
+        <div className="w-full max-w-sm sm:max-w-md mx-auto my-3 lg:my-auto space-y-3.5 box-border">
           <div>
             <h2 className="text-2xl sm:text-3xl font-black text-slate-900 tracking-tight leading-tight">
               {isRegistrazione ? "Crea il tuo profilo" : "Accedi al Portale"}
@@ -259,13 +337,24 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
           </div>
 
           {erroreDaMostrare && (
-            <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-700 animate-in fade-in duration-150">
-              {erroreDaMostrare}
+            <div className="p-3.5 rounded-xl bg-red-50 border border-red-200 text-xs font-bold text-red-700 animate-in fade-in duration-150 space-y-2">
+              <p>{erroreDaMostrare}</p>
+              {mostraTastoReinviaVerifica && (
+                <button
+                  type="button"
+                  onClick={reinviaEmailVerifica}
+                  disabled={loading}
+                  className="w-full h-8 px-3 rounded-lg bg-red-600 hover:bg-red-700 text-white font-black text-[11px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <FontAwesomeIcon icon={faPaperPlane} className="text-[10px]" />
+                  <span>Rinvia email di verifica</span>
+                </button>
+              )}
             </div>
           )}
           {messaggioInfo && (
-            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800 animate-in fade-in duration-150 flex items-center gap-2">
-              <FontAwesomeIcon icon={faCircleCheck} />
+            <div className="p-3.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800 animate-in fade-in duration-150 flex items-start gap-2">
+              <FontAwesomeIcon icon={faCircleCheck} className="mt-0.5 shrink-0" />
               <span>{messaggioInfo}</span>
             </div>
           )}
@@ -332,7 +421,10 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
 
             <div className="w-full">
               <div className="flex items-center justify-between mb-1">
-                <label htmlFor="auth-password" className="text-[10px] font-black uppercase tracking-wider text-slate-600">Password</label>
+                <div className="flex items-center gap-1.5">
+                  <label htmlFor="auth-password" className="text-[10px] font-black uppercase tracking-wider text-slate-600">Password</label>
+                  <span className="text-[10px] font-bold text-slate-400">(8-16 car.)</span>
+                </div>
                 {!isRegistrazione && (
                   <button
                     type="button"
@@ -351,8 +443,10 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
                   type={mostraPassword ? "text" : "password"}
                   autoComplete={isRegistrazione ? "new-password" : "current-password"}
                   value={password}
+                  minLength={8}
+                  maxLength={16}
                   onChange={e => setPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder="password"
                   required
                   className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-10 text-sm font-bold text-slate-900 focus:outline-none focus:border-[#002b80] box-border"
                 />
@@ -373,12 +467,12 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
               disabled={loading}
               className="w-full h-11 bg-[#002b80] hover:bg-[#002060] active:scale-[0.99] disabled:opacity-50 text-white font-black rounded-xl text-xs uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer mt-1"
             >
-              <span>{loading ? "Elaborazione..." : (isRegistrazione ? "Registrati" : "Accedi")}</span>
+              <span>{loading ? "Elaborazione..." : (isRegistrazione ? "Registrati e Conferma Mail" : "Accedi")}</span>
               <FontAwesomeIcon icon={faArrowRight} className="text-xs" />
             </button>
           </form>
 
-          <div className="pt-2 text-center">
+          <div className="pt-1.5 text-center">
             <p className="text-xs text-slate-600 font-semibold">
               {isRegistrazione ? "Hai già un profilo?" : "Non hai ancora un account?"}{" "}
               <button
@@ -387,6 +481,7 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
                   setIsRegistrazione(!isRegistrazione);
                   setErroreLocale('');
                   setMessaggioInfo('');
+                  setMostraTastoReinviaVerifica(false);
                 }}
                 className="font-black text-[#002b80] hover:underline cursor-pointer ml-1"
               >
@@ -399,21 +494,21 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
       </div>
 
       {/* 2. SEZIONE VETRINA */}
-      <div className="w-full max-w-full lg:col-span-5 bg-gradient-to-br from-[#00194a] via-[#002b80] to-[#0040b3] px-5 py-6 sm:px-8 sm:py-8 lg:p-10 flex flex-col justify-between text-white relative overflow-hidden box-border">
+      <div className="w-full max-w-full lg:col-span-7 xl:col-span-8 bg-gradient-to-br from-[#00194a] via-[#002b80] to-[#0040b3] px-5 py-6 sm:px-8 sm:py-7 lg:px-10 lg:py-8 flex flex-col justify-between text-white relative lg:overflow-hidden box-border">
         
         {/* Selettore disciplina carosello */}
-        <div className="w-full space-y-2">
+        <div className="w-full max-w-lg lg:max-w-xl xl:max-w-2xl mx-auto space-y-1.5 shrink-0">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-black uppercase tracking-wider text-blue-200">
               Catalogo
             </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-1 p-1 bg-black/20 backdrop-blur-md rounded-xl border border-white/15 w-full box-border">
+          <div className="grid grid-cols-2 gap-1.5 p-1 bg-black/20 backdrop-blur-md rounded-2xl border border-white/15 w-full box-border">
             <button
               type="button"
               onClick={() => cambiaSettore('pallanuoto')}
-              className={`py-1.5 px-2 rounded-lg text-xs font-black transition-all cursor-pointer truncate ${
+              className={`py-2 px-3 rounded-xl text-xs sm:text-sm font-black transition-all cursor-pointer truncate ${
                 settoreCarosello === 'pallanuoto'
                   ? 'bg-white text-[#002b80] shadow-xs'
                   : 'text-white/80 hover:text-white'
@@ -424,7 +519,7 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
             <button
               type="button"
               onClick={() => cambiaSettore('nuoto')}
-              className={`py-1.5 px-2 rounded-lg text-xs font-black transition-all cursor-pointer truncate ${
+              className={`py-2 px-3 rounded-xl text-xs sm:text-sm font-black transition-all cursor-pointer truncate ${
                 settoreCarosello === 'nuoto'
                   ? 'bg-white text-[#002b80] shadow-xs'
                   : 'text-white/80 hover:text-white'
@@ -435,16 +530,16 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
           </div>
         </div>
 
-        {/* Card Prodotto Vetrina ZOOMABILE */}
-        <div className="w-full my-5 lg:my-auto flex-1 flex flex-col justify-center">
+        {/* Card Prodotto Vetrina */}
+        <div className="w-full max-w-lg lg:max-w-xl xl:max-w-2xl mx-auto my-3 sm:my-4 lg:my-auto flex-1 flex flex-col justify-center min-h-0">
           {prodottoAttivo ? (
             <div 
               key={prodottoAttivo.id}
-              className="bg-white/10 backdrop-blur-md border border-white/15 rounded-2xl p-4 shadow-xl space-y-2.5 w-full box-border"
+              className="bg-white/10 backdrop-blur-md border border-white/15 rounded-3xl p-4 sm:p-5 lg:p-6 shadow-2xl space-y-3 w-full box-border transition-all"
             >
               <div 
                 onClick={() => prodottoAttivo.immagine_url && setZoomImage({ src: prodottoAttivo.immagine_url, alt: prodottoAttivo.nome })}
-                className="w-full h-44 sm:h-48 bg-white rounded-xl p-2.5 flex items-center justify-center overflow-hidden cursor-zoom-in group"
+                className="w-full h-44 sm:h-52 lg:h-56 xl:h-64 bg-white rounded-2xl p-3 sm:p-4 flex items-center justify-center overflow-hidden cursor-zoom-in group shadow-inner"
                 title="Clicca per ingrandire la foto"
               >
                 {prodottoAttivo.immagine_url ? (
@@ -455,44 +550,44 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
                   />
                 ) : (
                   <div className="text-slate-300 flex flex-col items-center justify-center gap-1">
-                    <FontAwesomeIcon icon={faShirt} className="text-3xl" />
-                    <span className="text-[9px] font-black uppercase text-slate-400">Nessuna Foto</span>
+                    <FontAwesomeIcon icon={faShirt} className="text-4xl" />
+                    <span className="text-[10px] font-black uppercase text-slate-400">Nessuna Foto</span>
                   </div>
                 )}
               </div>
 
-              <div className="flex items-end justify-between gap-2">
+              <div className="flex items-end justify-between gap-3 pt-0.5">
                 <div className="min-w-0 flex-1">
-                  <span className="text-[9px] font-black uppercase tracking-wider text-blue-200 flex items-center gap-1 mb-0.5">
+                  <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-wider text-blue-200 flex items-center gap-1 mb-0.5">
                     <FontAwesomeIcon icon={faTag} className="text-[8px]" />
                     <span>{settoreCarosello}</span>
                   </span>
-                  <h3 className="text-sm sm:text-base font-black text-white leading-tight truncate">
+                  <h3 className="text-base sm:text-lg lg:text-xl font-black text-white leading-tight truncate">
                     {prodottoAttivo.nome}
                   </h3>
-                  <span className="text-[10px] text-blue-100 font-semibold block mt-0.5">
+                  <span className="text-[11px] sm:text-xs text-blue-100 font-semibold block mt-0.5">
                     {prodottoAttivo.taglia_unica ? "Taglia Unica" : "Varie taglie disponibili"}
                   </span>
                 </div>
 
-                <div className="bg-white text-[#002b80] px-2.5 py-1 rounded-lg shadow-xs text-right shrink-0">
-                  <span className="text-[8px] font-black uppercase text-slate-400 block leading-none mb-0.5">Prezzo</span>
-                  <span className="text-sm sm:text-base font-black tabular-nums leading-none">
+                <div className="bg-white text-[#002b80] px-3 py-1.5 rounded-xl shadow-md text-right shrink-0">
+                  <span className="text-[8px] sm:text-[9px] font-black uppercase text-slate-400 block leading-none mb-0.5">Prezzo</span>
+                  <span className="text-base sm:text-lg font-black tabular-nums leading-none">
                     €{Number(prodottoAttivo.prezzo || 0).toFixed(2)}
                   </span>
                 </div>
               </div>
             </div>
           ) : (
-            <div className="py-10 text-center bg-white/5 border border-white/10 rounded-2xl p-4">
-              <FontAwesomeIcon icon={faShirt} className="text-2xl text-white/30 mb-2" />
-              <p className="text-xs font-bold text-white/80">Caricamento articoli...</p>
+            <div className="py-12 text-center bg-white/5 border border-white/10 rounded-3xl p-6">
+              <FontAwesomeIcon icon={faShirt} className="text-3xl text-white/30 mb-2" />
+              <p className="text-sm font-bold text-white/80">Caricamento articoli...</p>
             </div>
           )}
         </div>
 
         {/* Indicatori e Controlli Carosello */}
-        <div className="w-full flex items-center justify-between pt-2 border-t border-white/10 shrink-0">
+        <div className="w-full max-w-lg lg:max-w-xl xl:max-w-2xl mx-auto flex items-center justify-between pt-2 border-t border-white/10 shrink-0">
           <div className="flex items-center gap-1.5">
             {prodottiCarosello.map((_, i) => (
               <button
@@ -512,7 +607,7 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
               type="button"
               onClick={() => setSlideCorrente(prev => (prev === 0 ? prodottiCarosello.length - 1 : prev - 1))}
               disabled={prodottiCarosello.length <= 1}
-              className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 disabled:opacity-30 flex items-center justify-center text-xs transition-colors cursor-pointer"
+              className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-white/10 hover:bg-white/20 disabled:opacity-30 flex items-center justify-center text-xs transition-colors cursor-pointer"
             >
               <FontAwesomeIcon icon={faChevronLeft} />
             </button>
@@ -520,7 +615,7 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
               type="button"
               onClick={() => setSlideCorrente(prev => (prev + 1) % prodottiCarosello.length)}
               disabled={prodottiCarosello.length <= 1}
-              className="w-7 h-7 rounded-full bg-white/10 hover:bg-white/20 disabled:opacity-30 flex items-center justify-center text-xs transition-colors cursor-pointer"
+              className="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-white/10 hover:bg-white/20 disabled:opacity-30 flex items-center justify-center text-xs transition-colors cursor-pointer"
             >
               <FontAwesomeIcon icon={faChevronRight} />
             </button>

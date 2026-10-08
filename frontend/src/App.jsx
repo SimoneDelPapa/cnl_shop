@@ -210,7 +210,8 @@ export default function App() {
   useEffect(() => {
     let unsubscribeDoc = null;
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      if (user) {
+      // Se l'utente non ha verificato la mail, non impostare l'utente loggato
+      if (user && user.emailVerified) {
         const userDocRef = doc(db, "utenti", user.uid);
         unsubscribeDoc = onSnapshot(userDocRef, (userSnap) => {
           if (userSnap.exists()) {

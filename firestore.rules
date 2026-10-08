@@ -2,17 +2,22 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Consente a qualsiasi utente autenticato di leggere/scrivere i propri dati nella collezione utenti
     match /utenti/{userId} {
-      allow read, write: if request.auth != null;
+      // 1. Consente la query di verifica email prima del login (Password dimenticata)
+      allow list: if request.auth != null || 
+        (resource.data.email != null && request.query.limit <= 1);
+
+      // 2. Lettura del singolo documento e scrittura riservate agli utenti autenticati
+      allow get: if request.auth != null;
+      allow write: if request.auth != null;
       
-      // Permette anche l'accesso completo alla sotto-collezione delle notifiche
+      // Sotto-collezione notifiche
       match /notifiche/{notifId} {
         allow read, write: if request.auth != null;
       }
     }
 
-    // Prodotti leggibili da tutti, modificabili da utenti autenticati (admin)
+    // Prodotti leggibili da chiunque (anche nel carosello di login), modificabili da autenticati
     match /prodotti/{prodottoId} {
       allow read: if true;
       allow write: if request.auth != null;
