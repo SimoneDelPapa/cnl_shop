@@ -1137,6 +1137,7 @@ export default function App() {
 
     setInvioProduzioneInCorso(true);
     try {
+      // 1. Aggiornamento ordini su Firestore
       const batch = writeBatch(db);
       daAggiornare.forEach(ord => {
         batch.update(doc(db, "ordini", ord.id), { 
@@ -1147,17 +1148,73 @@ export default function App() {
       });
       await batch.commit();
 
+      // 2. Generazione e download del file Excel
       const wb = generaFileXlsx(daAggiornare);
       const nomeFile = `ORDINE_${settoreAttivo.toUpperCase()}_LUCCA.xlsx`;
       XLSX.writeFile(wb, nomeFile);
 
-      mostraMessaggio("In Lavorazione", `${daAggiornare.length} articoli inoltrati.`, "success");
+      // 3. Preparazione e apertura email precompilata per il fornitore
+      const emailFornitore = "marcoardito.okeo@gmail.com"; // Inserisci qui l'indirizzo del fornitore se diverso
+      const emailFornitore2 = "lencioni.stefano@libero.it"; // Inserisci qui l'indirizzo del fornitore se diverso
+
+      const oggettoEmail = encodeURIComponent(`Ordine Materiale ${settoreAttivo.toUpperCase()} - Circolo Nuoto Lucca`);
+      
+      const corpoEmail = encodeURIComponent(
+`Spettabili Marco e Stefano,
+
+in allegato trasmettiamo il file riepilogativo relativo ai capi ordinati per il settore ${settoreAttivo.toUpperCase()}.
+
+Dettaglio fornitura:
+- Capi totali ordinati: ${daAggiornare.length}
+- File allegato: ${nomeFile}
+
+Restiamo a disposizione per qualsiasi chiarimento.
+
+Cordiali saluti,
+ASD Circolo Nuoto Lucca`
+      );
+
+      // Timeout minimo per consentire al browser di avviare il download dell'Excel prima di aprire la mail
+      setTimeout(() => {
+        window.location.href = `mailto:${emailFornitore},${emailFornitore2}?subject=${oggettoEmail}&body=${corpoEmail}`;
+      }, 400);
+
+      mostraMessaggio("In Lavorazione", `${daAggiornare.length} articoli inoltrati. File scaricato ed email pronta.`, "success");
     } catch (error) {
       mostraMessaggio("Errore: " + error.message, "error");
     } finally {
       setInvioProduzioneInCorso(false);
     }
   }, [tuttiGliOrdiniAdmin, settoreAttivo, generaFileXlsx, mostraMessaggio]);
+
+  const impostaProntiRitiroAdmin = useCallback(async (ordiniSelezionati) => {
+    const daAggiornare = ordiniSelezionati && ordiniSelezionati.length > 0
+      ? ordiniSelezionati
+      : tuttiGliOrdiniAdmin.filter(o => o.stato_pagamento === "In lavorazione");
+
+    if (daAggiornare.length === 0) return;
+
+    try {
+      const batch = writeBatch(db);
+      daAggiornare.forEach(ord => {
+        batch.update(doc(db, "ordini", ord.id), {
+          stato_pagamento: "Pronto per il ritiro",
+          pronto_ritiro_il: serverTimestamp(),
+          aggiornato_il: serverTimestamp()
+        });
+      });
+      await batch.commit();
+
+      mostraMessaggio(
+        "Pronti al Ritiro", 
+        `${daAggiornare.length} articoli impostati come pronti per la consegna.`, 
+        "success"
+      );
+    } catch (error) {
+      console.error("Errore aggiornamento pronti al ritiro:", error);
+      mostraMessaggio("Errore: " + error.message, "error");
+    }
+  }, [tuttiGliOrdiniAdmin, mostraMessaggio]);
 
   const esportaCsvAdmin = useCallback(() => {
     try {
@@ -1704,7 +1761,7 @@ Circolo Nuoto Lucca`
             ordiniInAttesaCount={ordiniInAttesaCount}
             invioProduzioneInCorso={invioProduzioneInCorso}
             onInviaProduzione={mandaInLavorazioneConEmail}
-            onImpostaProntiRitiro={() => {}}
+            onImpostaProntiRitiro={impostaProntiRitiroAdmin}
             onEsportaCsv={esportaCsvAdmin}
             onAggiornaOrdine={handleAggiornaStatoOrdineAdmin}
             onToggleCompletatoArticolo={handleToggleCompletatoArticolo}
