@@ -981,7 +981,7 @@ export default function App() {
     Array.from(tagliePresentiSet).forEach(t => elencoTaglieOrdinate.push(t));
 
     const dataWs1 = [
-      [{ v: `CIRCOLO NUOTO LUCCA - ${nomeSettoreTitolo} (RIEPILOGO TAGLIE)`, s: styleBanner }, ...Array(numCols1 - 1).fill({ v: "", s: styleBanner })],
+      [{ v: `CIRCOLO NUOTO LUCCA - ${nomeSettoreTitolo}`, s: styleBanner }, ...Array(numCols1 - 1).fill({ v: "", s: styleBanner })],
       [{ v: "Taglia", s: styleHeaderCol }, ...nomiProdottiUnivoci.map(p => ({ v: p, s: styleHeaderCol })), { v: "Totale", s: styleHeaderTotal }]
     ];
 
@@ -1010,7 +1010,7 @@ export default function App() {
     });
 
     dataWs1.push([
-      { v: "TOTALE ASSOLUTO", s: styleHeaderTotal },
+      { v: "TOTALE", s: styleHeaderTotal },
       ...nomiProdottiUnivoci.map(p => ({ v: totaliPerProdotto[p], t: "n", s: styleHeaderTotal })),
       { v: totaleGenerale, t: "n", s: styleHeaderTotal }
     ]);
@@ -1025,7 +1025,7 @@ export default function App() {
     // ========================================================
     const NUM_COLS_2 = 5;
     const dataWs2 = [
-      [{ v: `CIRCOLO NUOTO LUCCA - ${nomeSettoreTitolo} (DETTAGLIO PERSONALIZZAZIONI PER ARTICOLO)`, s: styleBanner }, ...Array(NUM_COLS_2 - 1).fill({ v: "", s: styleBanner })],
+      [{ v: `CIRCOLO NUOTO LUCCA - ${nomeSettoreTitolo}`, s: styleBanner }, ...Array(NUM_COLS_2 - 1).fill({ v: "", s: styleBanner })],
       []
     ];
     let rigaCorrente = 2;
@@ -1074,8 +1074,8 @@ export default function App() {
         // Intestazione Colonne uniforme
         dataWs2.push([
           { v: "Taglia", s: styleHeaderCol },
-          { v: "Nome Atleta", s: styleHeaderCol },
-          { v: "Nome / Testo da Applicare", s: articoloUsaNome ? styleHeaderTotal : styleHeaderCol },
+          { v: "Nome Profilo", s: styleHeaderCol },
+          { v: "Nome Stampato", s: articoloUsaNome ? styleHeaderTotal : styleHeaderCol },
           { v: "N° Calotta", s: articoloUsaNumero ? styleHeaderTotal : styleHeaderCol },
           { v: "Colore Calotta", s: articoloUsaColore ? styleHeaderTotal : styleHeaderCol }
         ]);
