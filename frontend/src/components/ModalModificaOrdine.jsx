@@ -9,6 +9,9 @@ import {
 import { db } from '../firebase';
 import { doc, getDoc } from 'firebase/firestore';
 
+const TAGLIE_DEFAULT = ["4XS", "3XS", "2XS", "XS", "S", "M", "L", "XL", "2XL", "3XL"];
+const NUMERI = Array.from({ length: 15 }, (_, i) => String(i + 1));
+
 export default function ModalModificaOrdine({
   ordine,
   listaAtleti = [],
@@ -23,12 +26,36 @@ export default function ModalModificaOrdine({
     return ordine;
   }, [ordine]);
 
+  const prodottoInfo = useMemo(() => {
+    return prodotti.find(p => p.nome === (articoloIniziale.nomeProdotto || ordine.nomeProdotto)) || null;
+  }, [prodotti, articoloIniziale, ordine]);
+
+  const isTagliaUnica = Boolean(prodottoInfo?.taglia_unica || articoloIniziale.taglia_unica);
+
+  const TAGLIE_DISPONIBILI = useMemo(() => {
+    if (isTagliaUnica) return ["Taglia Unica"];
+
+    const lista = (Array.isArray(prodottoInfo?.taglie_disponibili) && prodottoInfo.taglie_disponibili.length > 0)
+      ? [...prodottoInfo.taglie_disponibili]
+      : (Array.isArray(articoloIniziale?.taglie_disponibili) && articoloIniziale.taglie_disponibili.length > 0)
+        ? [...articoloIniziale.taglie_disponibili]
+        : [...TAGLIE_DEFAULT];
+
+    // Salvaguarda la taglia attualmente ordinata nel caso non rientrasse nel nuovo range
+    const tagliaCorrente = articoloIniziale.taglia || ordine.taglia;
+    if (tagliaCorrente && tagliaCorrente !== "Taglia Unica" && !lista.includes(tagliaCorrente)) {
+      lista.unshift(tagliaCorrente);
+    }
+
+    return lista;
+  }, [prodottoInfo, articoloIniziale, ordine, isTagliaUnica]);
+
   const [atletiDisponibili, setAtletiDisponibili] = useState(listaAtleti);
   const [atletaSelezionato, setAtletaSelezionato] = useState(
     articoloIniziale.atleta || ordine.atleta || ''
   );
   const [tagliaSelezionata, setTagliaSelezionata] = useState(
-    articoloIniziale.taglia || ordine.taglia || 'M'
+    isTagliaUnica ? "Taglia Unica" : (articoloIniziale.taglia || ordine.taglia || TAGLIE_DISPONIBILI[0])
   );
   const [nomePersonalizzato, setNomePersonalizzato] = useState(
     articoloIniziale.nomePersonalizzato || ordine.nomePersonalizzato || ''
@@ -67,14 +94,6 @@ export default function ModalModificaOrdine({
     recuperaProfiliAcquirente();
   }, [ordine, articoloIniziale]);
 
-  const TAGLIE = ["6A", "8A", "10A", "XXS", "XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL", "5XL"];
-  const NUMERI = Array.from({ length: 15 }, (_, i) => String(i + 1));
-
-  const prodottoInfo = useMemo(() => {
-    return prodotti.find(p => p.nome === (articoloIniziale.nomeProdotto || ordine.nomeProdotto)) || null;
-  }, [prodotti, articoloIniziale, ordine]);
-
-  const isTagliaUnica = Boolean(prodottoInfo?.taglia_unica || articoloIniziale.taglia_unica);
   const haNome = Boolean(prodottoInfo?.personalizzabile_nome ?? articoloIniziale.nomePersonalizzato);
   const haNumero = Boolean(prodottoInfo?.personalizzabile_numero ?? (articoloIniziale.numeroPersonalizzato !== undefined && articoloIniziale.numeroPersonalizzato !== null));
   const haColore = Boolean(prodottoInfo?.personalizzabile_colore ?? articoloIniziale.colorePersonalizzato);
@@ -225,7 +244,7 @@ export default function ModalModificaOrdine({
                 onChange={e => setTagliaSelezionata(e.target.value)}
                 className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none focus:border-[#002b80] cursor-pointer"
               >
-                {TAGLIE.map(t => (
+                {TAGLIE_DISPONIBILI.map(t => (
                   <option key={t} value={t}>{t}</option>
                 ))}
               </select>

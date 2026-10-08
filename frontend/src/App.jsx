@@ -3,6 +3,7 @@ import Auth from './Auth';
 import Navbar from './components/Navbar';
 import NegozioUtente from './components/NegozioUtente';
 import PannelloAdmin from './components/PannelloAdmin';
+import { SCALA_NUMERICA, SCALA_LETTERALE, generaRangeTaglie } from './utils/taglie';
 import LightboxModal from './components/LightboxModal';
 import ModalModificaOrdine from './components/ModalModificaOrdine';
 import ModalProfilo from './components/ModalProfilo';
@@ -99,10 +100,13 @@ export default function App() {
   const [nuovoProd, setNuovoProd] = useState({ 
     nome: '', 
     prezzo: '', 
-    immagine_url: '',
+    immagine_url: '', 
     taglia_unica: false,
-    personalizzabile_nome: false,
-    personalizzabile_numero: false,
+    tipo_taglie: 'letterale',
+    taglia_min: 'XS',
+    taglia_max: 'XL',
+    personalizzabile_nome: false, 
+    personalizzabile_numero: false, 
     personalizzabile_colore: false
   });
   const [fileImmagine, setFileImmagine] = useState(null);
@@ -656,6 +660,12 @@ export default function App() {
       if (fileImmagine) {
         imageUrl = await caricaImmagineSuCloudinary(fileImmagine);
       }
+
+      const tipo = nuovoProd.tipo_taglie || (nuovoProd.taglia_unica ? 'unica' : 'letterale');
+      const minVal = nuovoProd.taglia_min || (tipo === 'numerica' ? '38' : 'XS');
+      const maxVal = nuovoProd.taglia_max || (tipo === 'numerica' ? '48' : 'XL');
+      const taglieDisponibili = generaRangeTaglie(tipo, minVal, maxVal);
+
       const batchRef = collection(db, "prodotti");
       await setDoc(doc(batchRef), {
         nome: nuovoProd.nome.trim(),
@@ -663,15 +673,27 @@ export default function App() {
         disciplina: settoreAttivo,
         immagine_url: imageUrl,
         attivo: true,
-        taglia_unica: Boolean(nuovoProd.taglia_unica),
+        taglia_unica: Boolean(tipo === 'unica'),
+        tipo_taglie: tipo,
+        taglia_min: tipo === 'unica' ? null : minVal,
+        taglia_max: tipo === 'unica' ? null : maxVal,
+        taglie_disponibili: taglieDisponibili,
         personalizzabile_nome: Boolean(nuovoProd.personalizzabile_nome),
         personalizzabile_numero: settoreAttivo === 'nuoto' ? false : Boolean(nuovoProd.personalizzabile_numero),
         personalizzabile_colore: settoreAttivo === 'nuoto' ? false : Boolean(nuovoProd.personalizzabile_colore),
         creato_il: serverTimestamp()
       });
       setNuovoProd({ 
-        nome: '', prezzo: '', immagine_url: '', taglia_unica: false,
-        personalizzabile_nome: false, personalizzabile_numero: false, personalizzabile_colore: false
+        nome: '', 
+        prezzo: '', 
+        immagine_url: '', 
+        taglia_unica: false,
+        tipo_taglie: 'letterale',
+        taglia_min: 'XS',
+        taglia_max: 'XL',
+        personalizzabile_nome: false, 
+        personalizzabile_numero: false, 
+        personalizzabile_colore: false
       });
       rimuoviFileSelezionato();
       mostraMessaggio("Capo Creato", "Articolo pubblicato con successo nel catalogo.", "success");
@@ -871,15 +893,13 @@ export default function App() {
     );
   }, [carrello, totaleCarrello, utenteLoggato, settoreAttivo, linkPaypalSettore, chiediConferma, mostraMessaggio]);
 
-  // EXCEL EXPORT
+  // EXCEL EXPORT (Personalizzazioni raggruppate per Articolo, senza Acquirente)
   const generaFileXlsx = useCallback((ordiniDaElaborare) => {
-    const TAGLIE_STANDARD = ["Taglia Unica", "6A", "8A", "10A", "XXS", "XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL", "5XL"];
     const tuttiArticoli = [];
     ordiniDaElaborare.forEach(ord => {
       if (ord.articoli && ord.articoli.length > 0) {
         ord.articoli.forEach(art => tuttiArticoli.push({ 
           ...art, 
-          acquirente: ord.acquirente || ord.email_acquirente || "-",
           atleta: art.atleta || ord.atleta || "-"
         }));
       } else {
@@ -889,8 +909,7 @@ export default function App() {
           atleta: ord.atleta || "-",
           nomePersonalizzato: ord.nomePersonalizzato,
           numeroPersonalizzato: ord.numeroPersonalizzato,
-          colorePersonalizzato: ord.colorePersonalizzato,
-          acquirente: ord.acquirente || ord.email_acquirente || "-"
+          colorePersonalizzato: ord.colorePersonalizzato
         });
       }
     });
@@ -899,6 +918,7 @@ export default function App() {
     const nomeSettoreTitolo = isNuoto ? 'NUOTO' : 'PALLANUOTO';
     const wb = XLSX.utils.book_new();
 
+    // STILI EXCEL CONDIVISI
     const styleBanner = {
       font: { name: "Calibri", sz: 12, bold: true, color: { rgb: "FFFFFF" } },
       fill: { fgColor: { rgb: "002B80" } },
@@ -919,14 +939,46 @@ export default function App() {
       fill: { fgColor: { rgb: "DBEAFE" } },
       alignment: { horizontal: "center", vertical: "center" }
     };
-    const styleCella = (alt, align = "center", bold = false) => ({
-      font: { name: "Calibri", sz: 10, bold: bold, color: { rgb: bold ? "0F172A" : "334155" } },
+    const styleCella = (alt, align = "center", bold = false, isDimmed = false) => ({
+      font: { 
+        name: "Calibri", 
+        sz: 10, 
+        bold: bold, 
+        color: { rgb: isDimmed ? "94A3B8" : (bold ? "0F172A" : "334155") } 
+      },
       fill: { fgColor: { rgb: alt ? "F8FAFC" : "FFFFFF" } },
       alignment: { horizontal: align, vertical: "center" }
     });
 
+    // ========================================================
+    // FOGLIO 1: RIEPILOGO TAGLIE
+    // ========================================================
     const nomiProdottiUnivoci = Array.from(new Set(tuttiArticoli.map(a => a.nomeProdotto || "Capo")));
     const numCols1 = nomiProdottiUnivoci.length + 2;
+
+    const tagliePresentiSet = new Set(tuttiArticoli.map(a => (a.taglia || "Taglia Unica").trim().toUpperCase()));
+    const elencoTaglieOrdinate = [];
+
+    if (tagliePresentiSet.has("TAGLIA UNICA")) {
+      elencoTaglieOrdinate.push("Taglia Unica");
+      tagliePresentiSet.delete("TAGLIA UNICA");
+    }
+
+    SCALA_LETTERALE.forEach(t => {
+      if (tagliePresentiSet.has(t.toUpperCase())) {
+        elencoTaglieOrdinate.push(t);
+        tagliePresentiSet.delete(t.toUpperCase());
+      }
+    });
+
+    SCALA_NUMERICA.forEach(t => {
+      if (tagliePresentiSet.has(t)) {
+        elencoTaglieOrdinate.push(t);
+        tagliePresentiSet.delete(t);
+      }
+    });
+
+    Array.from(tagliePresentiSet).forEach(t => elencoTaglieOrdinate.push(t));
 
     const dataWs1 = [
       [{ v: `CIRCOLO NUOTO LUCCA - ${nomeSettoreTitolo} (RIEPILOGO TAGLIE)`, s: styleBanner }, ...Array(numCols1 - 1).fill({ v: "", s: styleBanner })],
@@ -937,7 +989,7 @@ export default function App() {
     nomiProdottiUnivoci.forEach(p => { totaliPerProdotto[p] = 0; });
     let totaleGenerale = 0;
 
-    TAGLIE_STANDARD.forEach((taglia, idx) => {
+    elencoTaglieOrdinate.forEach((taglia, idx) => {
       const alt = idx % 2 !== 0;
       let sommaRiga = 0;
       const riga = [{ v: taglia, s: styleCella(alt, "left", true) }];
@@ -968,94 +1020,109 @@ export default function App() {
     ws1['!cols'] = [{ wch: 18 }, ...nomiProdottiUnivoci.map(() => ({ wch: 22 })), { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, ws1, "Riepilogo Taglie");
 
+    // ========================================================
+    // FOGLIO 2: PERSONALIZZAZIONI RAGGRUPPATE PER ARTICOLO (SENZA ACQUIRENTE)
+    // ========================================================
+    const NUM_COLS_2 = 5;
     const dataWs2 = [
-      [{ v: `CIRCOLO NUOTO LUCCA - ${nomeSettoreTitolo} (DETTAGLIO PERSONALIZZAZIONI)`, s: styleBanner }, ...Array(4).fill({ v: "", s: styleBanner })],
+      [{ v: `CIRCOLO NUOTO LUCCA - ${nomeSettoreTitolo} (DETTAGLIO PERSONALIZZAZIONI PER ARTICOLO)`, s: styleBanner }, ...Array(NUM_COLS_2 - 1).fill({ v: "", s: styleBanner })],
       []
     ];
     let rigaCorrente = 2;
-    const mergesWs2 = [{ s: { r: 0, c: 0 }, e: { r: 0, c: 4 } }];
+    const mergesWs2 = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NUM_COLS_2 - 1 } }];
 
-    const capiConNome = tuttiArticoli.filter(a => a.nomePersonalizzato && String(a.nomePersonalizzato).trim() !== "");
-    dataWs2.push([
-      { v: `1. PERSONALIZZAZIONE NOME / SCRITTA (${capiConNome.length} CAPI)`, s: styleSezioneTitle },
-      ...Array(4).fill({ v: "", s: styleSezioneTitle })
-    ]);
-    mergesWs2.push({ s: { r: rigaCorrente, c: 0 }, e: { r: rigaCorrente, c: 4 } });
-    rigaCorrente++;
+    // Raggruppa i capi personalizzati per Tipo Articolo
+    const gruppiPersonalizzatiPerArticolo = new Map();
 
-    dataWs2.push([
-      { v: "Articolo", s: styleHeaderCol },
-      { v: "Taglia", s: styleHeaderCol },
-      { v: "Nome Atleta", s: styleHeaderCol },
-      { v: "TESTO DA APPLICARE (MAIUSCOLO)", s: styleHeaderTotal },
-      { v: "Riferimento Ordine", s: styleHeaderCol }
-    ]);
-    rigaCorrente++;
+    tuttiArticoli.forEach(art => {
+      const haNome = Boolean(art.nomePersonalizzato && String(art.nomePersonalizzato).trim() !== "");
+      const haNumero = Boolean(art.numeroPersonalizzato && String(art.numeroPersonalizzato).trim() !== "");
+      const haColore = Boolean(art.colorePersonalizzato && String(art.colorePersonalizzato).trim() !== "");
 
-    if (capiConNome.length === 0) {
-      dataWs2.push([{ v: "Nessun capo con stampa nome", s: styleCella(false, "left") }, ...Array(4).fill({ v: "", s: styleCella(false) })]);
-      mergesWs2.push({ s: { r: rigaCorrente, c: 0 }, e: { r: rigaCorrente, c: 4 } });
-      rigaCorrente++;
+      if (haNome || haNumero || haColore) {
+        const nomeArticolo = (art.nomeProdotto || "Articolo").trim();
+        if (!gruppiPersonalizzatiPerArticolo.has(nomeArticolo)) {
+          gruppiPersonalizzatiPerArticolo.set(nomeArticolo, []);
+        }
+        gruppiPersonalizzatiPerArticolo.get(nomeArticolo).push(art);
+      }
+    });
+
+    if (gruppiPersonalizzatiPerArticolo.size === 0) {
+      dataWs2.push([
+        { v: "Nessun articolo con personalizzazioni registrato per questo ordine.", s: styleCella(false, "left") },
+        ...Array(NUM_COLS_2 - 1).fill({ v: "", s: styleCella(false) })
+      ]);
+      mergesWs2.push({ s: { r: rigaCorrente, c: 0 }, e: { r: rigaCorrente, c: NUM_COLS_2 - 1 } });
     } else {
-      capiConNome.forEach((art, idx) => {
-        const alt = idx % 2 !== 0;
+      let sezioneIndex = 1;
+
+      gruppiPersonalizzatiPerArticolo.forEach((listaCapi, nomeArticolo) => {
+        // Verifica quali campi sono effettivamente usati da QUESTO tipo di articolo
+        const articoloUsaNome = listaCapi.some(a => a.nomePersonalizzato && String(a.nomePersonalizzato).trim() !== "");
+        const articoloUsaNumero = listaCapi.some(a => a.numeroPersonalizzato && String(a.numeroPersonalizzato).trim() !== "");
+        const articoloUsaColore = listaCapi.some(a => a.colorePersonalizzato && String(a.colorePersonalizzato).trim() !== "");
+
+        // Titolo Sezione per Tipologia Articolo
         dataWs2.push([
-          { v: art.nomeProdotto || "Capo", s: styleCella(alt, "left") },
-          { v: art.taglia || "Unica", s: styleCella(alt, "center") },
-          { v: art.atleta || "-", s: styleCella(alt, "left") },
-          { v: String(art.nomePersonalizzato).toUpperCase(), s: styleCella(alt, "center", true) },
-          { v: art.acquirente || "-", s: styleCella(alt, "left") }
+          { v: `${sezioneIndex}. ${nomeArticolo.toUpperCase()} (${listaCapi.length} CAPI)`, s: styleSezioneTitle },
+          ...Array(NUM_COLS_2 - 1).fill({ v: "", s: styleSezioneTitle })
+        ]);
+        mergesWs2.push({ s: { r: rigaCorrente, c: 0 }, e: { r: rigaCorrente, c: NUM_COLS_2 - 1 } });
+        rigaCorrente++;
+
+        // Intestazione Colonne uniforme
+        dataWs2.push([
+          { v: "Taglia", s: styleHeaderCol },
+          { v: "Nome Atleta", s: styleHeaderCol },
+          { v: "Nome / Testo da Applicare", s: articoloUsaNome ? styleHeaderTotal : styleHeaderCol },
+          { v: "N° Calotta", s: articoloUsaNumero ? styleHeaderTotal : styleHeaderCol },
+          { v: "Colore Calotta", s: articoloUsaColore ? styleHeaderTotal : styleHeaderCol }
         ]);
         rigaCorrente++;
-      });
-    }
 
-    dataWs2.push([]);
-    rigaCorrente++;
-
-    if (!isNuoto) {
-      const calotteConNumeroOColore = tuttiArticoli.filter(a => 
-        (a.numeroPersonalizzato && String(a.numeroPersonalizzato).trim() !== "") || 
-        (a.colorePersonalizzato && String(a.colorePersonalizzato).trim() !== "")
-      );
-
-      dataWs2.push([
-        { v: `2. CALOTTE & ARTICOLI CON NUMERO E COLORE (${calotteConNumeroOColore.length} CAPI)`, s: styleSezioneTitle },
-        ...Array(4).fill({ v: "", s: styleSezioneTitle })
-      ]);
-      mergesWs2.push({ s: { r: rigaCorrente, c: 0 }, e: { r: rigaCorrente, c: 4 } });
-      rigaCorrente++;
-
-      dataWs2.push([
-        { v: "Articolo", s: styleHeaderCol },
-        { v: "Nome Atleta", s: styleHeaderCol },
-        { v: "Numero", s: styleHeaderTotal },
-        { v: "Colore Calotta", s: styleHeaderTotal },
-        { v: "Riferimento Ordine", s: styleHeaderCol }
-      ]);
-      rigaCorrente++;
-
-      if (calotteConNumeroOColore.length === 0) {
-        dataWs2.push([{ v: "Nessun articolo con numero/colore calotta", s: styleCella(false, "left") }, ...Array(4).fill({ v: "", s: styleCella(false) })]);
-        mergesWs2.push({ s: { r: rigaCorrente, c: 0 }, e: { r: rigaCorrente, c: 4 } });
-      } else {
-        calotteConNumeroOColore.forEach((art, idx) => {
+        // Righe Capi
+        listaCapi.forEach((art, idx) => {
           const alt = idx % 2 !== 0;
+
+          const valoreNome = articoloUsaNome 
+            ? (art.nomePersonalizzato ? String(art.nomePersonalizzato).toUpperCase().trim() : "-")
+            : "-";
+
+          const valoreNumero = articoloUsaNumero 
+            ? (art.numeroPersonalizzato ? `N° ${art.numeroPersonalizzato}` : "-")
+            : "-";
+
+          const valoreColore = articoloUsaColore 
+            ? (art.colorePersonalizzato ? String(art.colorePersonalizzato).toUpperCase().trim() : "BIANCA")
+            : "-";
+
           dataWs2.push([
-            { v: art.nomeProdotto || "Capo", s: styleCella(alt, "left") },
+            { v: art.taglia || "Unica", s: styleCella(alt, "center", true) },
             { v: art.atleta || "-", s: styleCella(alt, "left") },
-            { v: art.numeroPersonalizzato ? `N° ${art.numeroPersonalizzato}` : "-", s: styleCella(alt, "center", true) },
-            { v: art.colorePersonalizzato || "BIANCA", s: styleCella(alt, "center", true) },
-            { v: art.acquirente || "-", s: styleCella(alt, "left") }
+            { v: valoreNome, s: styleCella(alt, "center", articoloUsaNome && valoreNome !== "-", !articoloUsaNome) },
+            { v: valoreNumero, s: styleCella(alt, "center", articoloUsaNumero && valoreNumero !== "-", !articoloUsaNumero) },
+            { v: valoreColore, s: styleCella(alt, "center", articoloUsaColore && valoreColore !== "-", !articoloUsaColore) }
           ]);
           rigaCorrente++;
         });
-      }
+
+        // Riga vuota di separazione tra le tabelle degli articoli
+        dataWs2.push([]);
+        rigaCorrente++;
+        sezioneIndex++;
+      });
     }
 
     const ws2 = XLSX.utils.aoa_to_sheet(dataWs2);
     ws2['!merges'] = mergesWs2;
-    ws2['!cols'] = [{ wch: 28 }, { wch: 14 }, { wch: 24 }, { wch: 32 }, { wch: 26 }];
+    ws2['!cols'] = [
+      { wch: 14 }, // Taglia
+      { wch: 26 }, // Nome Atleta
+      { wch: 32 }, // Nome / Testo da Applicare
+      { wch: 16 }, // N° Calotta
+      { wch: 20 }  // Colore Calotta
+    ];
     XLSX.utils.book_append_sheet(wb, ws2, "Personalizzazioni");
 
     return wb;
@@ -1262,7 +1329,6 @@ export default function App() {
       }
     }
 
-    // VERIFICA SE IL DEBITO/IMPORTO È MAGGIORE DI ZERO PRIMA DI INVIARE IL SOLLECITO
     const linkPaypal = debito > 0 
       ? `${PAYPAL_LINKS[settore] || PAYPAL_LINKS.pallanuoto}/${debito.toFixed(2)}` 
       : (PAYPAL_LINKS[settore] || PAYPAL_LINKS.pallanuoto);
@@ -1299,7 +1365,6 @@ export default function App() {
 
       const importoStr = `€${Number(gruppoCliente.totaleDovuto).toFixed(2)}`;
       
-      // VERIFICA SE IL DEBITO È MAGGIORE DI ZERO E GENERA IL LINK CON L'IMPORTO ANNESSO
       const linkPaypal = gruppoCliente.totaleDovuto > 0 
         ? `${linkPaypalSettore}/${Number(gruppoCliente.totaleDovuto).toFixed(2)}` 
         : linkPaypalSettore;
@@ -1575,7 +1640,7 @@ Circolo Nuoto Lucca`
         />
       )}
 
-      {/* NAVBAR STICKY DIRETTA (senza div wrapper fixed che causava la sovrapposizione) */}
+      {/* NAVBAR STICKY DIRETTA */}
       <Navbar 
         settoreUtente={settoreAttivo}
         onCambiaSettore={cambiaSettore}
@@ -1592,8 +1657,8 @@ Circolo Nuoto Lucca`
         onLogout={handleLogout}
       />
 
-      {/* MAIN CON PADDING NATURALE: la navbar sticky riserva autonomamente lo spazio */}
-      <main className="max-w-7xl w-full mx-auto px-3.5 sm:px-6 lg:px-8 pt-4 sm:pt-6 pb-8 flex-1">
+      {/* MAIN CON PADDING NATURALE */}
+      <main className="max-w-7xl w-full mx-auto px-3.5 sm:px-6 lg:px-8 pt-[calc(4.25rem+env(safe-area-inset-top,0px))] sm:pt-24 pb-8 flex-1">
         {!isUserAdminNelSettore ? (
           <>
             <BannerNotifiche 

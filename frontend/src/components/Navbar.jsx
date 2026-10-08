@@ -29,7 +29,7 @@ export default function Navbar({
   const [mobileMenuAperto, setMobileMenuAperto] = useState(false);
 
   return (
-    <header className="sticky top-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-2xs pt-[env(safe-area-inset-top,0px)]">
+    <header className="fixed top-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-2xs pt-[env(safe-area-inset-top,0px)]">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8">
         <div className="h-16 sm:h-20 flex flex-nowrap items-center justify-between gap-2 sm:gap-4">
           

@@ -29,6 +29,9 @@ import {
   faPalette 
 } from '@fortawesome/free-solid-svg-icons';
 
+// Importa dal file utility (rimuove l'errore ESLint)
+import { SCALA_NUMERICA, SCALA_LETTERALE, generaRangeTaglie } from '../utils/taglie';
+
 export default function PannelloAdmin({
   adminTab = 'ordini',
   statistiche = {
@@ -234,11 +237,20 @@ export default function PannelloAdmin({
       alert("Nome e prezzo sono obbligatori.");
       return;
     }
+    const tipo = prodottoInModifica.tipo_taglie || (prodottoInModifica.taglia_unica ? 'unica' : 'letterale');
+    const minVal = prodottoInModifica.taglia_min || (tipo === 'numerica' ? '38' : 'XS');
+    const maxVal = prodottoInModifica.taglia_max || (tipo === 'numerica' ? '48' : 'XL');
+    const taglieDisponibili = generaRangeTaglie(tipo, minVal, maxVal);
+
     onModificaProdotto(prodottoInModifica.id, {
       nome: prodottoInModifica.nome.trim(),
       prezzo: parseFloat(prodottoInModifica.prezzo) || 0,
       immagine_url: prodottoInModifica.immagine_url || null,
-      taglia_unica: Boolean(prodottoInModifica.taglia_unica),
+      taglia_unica: Boolean(tipo === 'unica'),
+      tipo_taglie: tipo,
+      taglia_min: tipo === 'unica' ? null : minVal,
+      taglia_max: tipo === 'unica' ? null : maxVal,
+      taglie_disponibili: taglieDisponibili,
       personalizzabile_nome: Boolean(prodottoInModifica.personalizzabile_nome),
       personalizzabile_numero: isNuoto ? false : Boolean(prodottoInModifica.personalizzabile_numero),
       personalizzabile_colore: isNuoto ? false : Boolean(prodottoInModifica.personalizzabile_colore)
@@ -991,9 +1003,10 @@ export default function PannelloAdmin({
                                     return (
                                       <div 
                                         key={`cat-art-${aIdx}`}
-                                        className="bg-white border border-slate-200/80 rounded-2xl p-3 sm:p-4 shadow-2xs hover:border-slate-300 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                                        className="bg-white border border-slate-200/80 rounded-2xl p-3 sm:p-4 shadow-2xs hover:border-slate-300 transition-all flex flex-col gap-3"
                                       >
-                                        <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+                                        {/* RIGA 1: Immagine, Dettagli, Taglia e Personalizzazioni */}
+                                        <div className="flex items-start gap-3 min-w-0">
                                           {art.immagine_url ? (
                                             <div 
                                               onClick={() => onZoomFoto && onZoomFoto(art.immagine_url, art.nomeProdotto)}
@@ -1008,10 +1021,10 @@ export default function PannelloAdmin({
                                             </div>
                                           )}
 
-                                          <div className="min-w-0 flex-1 space-y-0.5">
+                                          <div className="min-w-0 flex-1 space-y-1">
                                             <div className="flex items-center gap-2 flex-wrap">
-                                              <span className="font-black text-slate-900 text-xs sm:text-sm">{art.nomeProdotto}</span>
-                                              <span className="text-[10px] font-black uppercase text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-md">
+                                              <span className="font-black text-slate-900 text-sm leading-tight">{art.nomeProdotto}</span>
+                                              <span className="text-[10px] font-black uppercase text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-md whitespace-nowrap">
                                                 Taglia: {art.taglia}
                                               </span>
                                             </div>
@@ -1019,17 +1032,17 @@ export default function PannelloAdmin({
                                             {(art.nomePersonalizzato || art.numeroPersonalizzato || art.colorePersonalizzato) && (
                                               <div className="flex items-center gap-1.5 pt-0.5 flex-wrap">
                                                 {art.nomePersonalizzato && (
-                                                  <span className="text-[10px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
+                                                  <span className="text-[10px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md whitespace-nowrap">
                                                     "{art.nomePersonalizzato}"
                                                   </span>
                                                 )}
                                                 {art.numeroPersonalizzato && (
-                                                  <span className="text-[10px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
+                                                  <span className="text-[10px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md whitespace-nowrap">
                                                     N° {art.numeroPersonalizzato}
                                                   </span>
                                                 )}
                                                 {art.colorePersonalizzato && (
-                                                  <span className="text-[10px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
+                                                  <span className="text-[10px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md whitespace-nowrap">
                                                     {art.colorePersonalizzato}
                                                   </span>
                                                 )}
@@ -1038,40 +1051,50 @@ export default function PannelloAdmin({
                                           </div>
                                         </div>
 
-                                        <div className="flex items-center justify-between sm:justify-end gap-2.5 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100 shrink-0">
-                                          <span className={`text-[11px] font-black uppercase px-2.5 py-1 rounded-xl border flex items-center gap-1.5 ${
-                                            statoReale === 'Completato'
-                                              ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
-                                              : statoReale === 'Pronto per il ritiro'
-                                              ? 'bg-amber-50 text-amber-900 border-amber-300'
-                                              : statoReale === 'In lavorazione'
-                                              ? 'bg-blue-50 text-[#002b80] border-blue-300'
-                                              : 'bg-slate-100 text-slate-700 border-slate-200'
-                                          }`}>
-                                            <span className={`w-1.5 h-1.5 rounded-full ${
-                                              statoReale === 'Completato' ? 'bg-emerald-600' :
-                                              statoReale === 'Pronto per il ritiro' ? 'bg-amber-500' :
-                                              statoReale === 'In lavorazione' ? 'bg-[#002b80] animate-pulse' : 'bg-slate-400'
-                                            }`}></span>
-                                            <span>{statoReale}</span>
-                                          </span>
+                                        {/* RIGA 2: Badge di stato + Pulsante Consegna (Ottimizzato Mobile) */}
+                                        <div className="pt-2 border-t border-slate-100/90 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+                                          
+                                          {/* Box Stati Informativi */}
+                                          <div className="flex items-center gap-2 w-full sm:w-auto">
+                                            {/* Badge Stato Produzione */}
+                                            <span className={`flex-1 sm:flex-none justify-center h-8 px-2.5 text-[11px] font-black uppercase rounded-xl border flex items-center gap-1.5 whitespace-nowrap ${
+                                              statoReale === 'Completato'
+                                                ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                                                : statoReale === 'Pronto per il ritiro'
+                                                ? 'bg-amber-50 text-amber-900 border-amber-300'
+                                                : statoReale === 'In lavorazione'
+                                                ? 'bg-blue-50 text-[#002b80] border-blue-300'
+                                                : 'bg-slate-100 text-slate-700 border-slate-200'
+                                            }`}>
+                                              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                                statoReale === 'Completato' ? 'bg-emerald-600' :
+                                                statoReale === 'Pronto per il ritiro' ? 'bg-amber-500' :
+                                                statoReale === 'In lavorazione' ? 'bg-[#002b80] animate-pulse' : 'bg-slate-400'
+                                              }`}></span>
+                                              <span className="truncate">{statoReale}</span>
+                                            </span>
 
-                                          <span className={`text-[11px] font-black px-2 py-1 rounded-lg ${
-                                            isSaldato ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-900'
-                                          }`}>
-                                            {isSaldato ? 'Saldato' : 'Non saldato'}
-                                          </span>
+                                            {/* Badge Stato Pagamento */}
+                                            <span className={`flex-1 sm:flex-none justify-center h-8 px-2.5 text-[11px] font-black rounded-xl border flex items-center whitespace-nowrap ${
+                                              isSaldato 
+                                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                                                : 'bg-amber-50 text-amber-900 border-amber-200'
+                                            }`}>
+                                              <span className="truncate">{isSaldato ? 'Saldato' : 'Non saldato'}</span>
+                                            </span>
+                                          </div>
 
+                                          {/* Pulsante Azione Consegna (Full-width su mobile, auto su desktop) */}
                                           <button
                                             type="button"
                                             disabled={!puoConsegnare}
                                             onClick={() => onToggleCompletatoArticolo(art.idOrdine, art.idUnivoco)}
-                                            className={`h-8 sm:h-9 px-3.5 rounded-xl text-xs font-black flex items-center gap-1.5 transition-all shrink-0 ${
+                                            className={`w-full sm:w-auto h-9 px-4 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all whitespace-nowrap select-none shrink-0 ${
                                               isConsegnato
-                                                ? 'bg-emerald-600 text-white shadow-2xs hover:bg-emerald-700 cursor-pointer'
+                                                ? 'bg-emerald-600 text-white shadow-2xs hover:bg-emerald-700 active:scale-[0.99] cursor-pointer'
                                                 : puoConsegnare
-                                                ? 'bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-2xs cursor-pointer'
-                                                : 'bg-slate-100 text-slate-400 border border-slate-200 opacity-45 cursor-not-allowed'
+                                                ? 'bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-2xs active:scale-[0.99] cursor-pointer'
+                                                : 'bg-slate-100 text-slate-400 border border-slate-200 opacity-60 cursor-not-allowed'
                                             }`}
                                             title={
                                               isConsegnato
@@ -1083,9 +1106,10 @@ export default function PannelloAdmin({
                                                 : "Conferma consegna a bordo vasca"
                                             }
                                           >
-                                            <FontAwesomeIcon icon={!puoConsegnare ? faLock : faCircleCheck} className="text-xs" />
+                                            <FontAwesomeIcon icon={!puoConsegnare ? faLock : faCircleCheck} className="text-xs shrink-0" />
                                             <span>{isConsegnato ? "Consegnato" : "Consegna"}</span>
                                           </button>
+
                                         </div>
 
                                       </div>
@@ -1144,36 +1168,94 @@ export default function PannelloAdmin({
               />
             </div>
 
-            <div>
-              <label className="text-xs font-black uppercase tracking-wider text-slate-700 mb-2 block">
-                Formato Taglia
+            {/* SELEZIONE SISTEMA TAGLIE E RANGE (3 OPZIONI) */}
+            <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-3">
+              <label className="text-xs font-black uppercase tracking-wider text-slate-700 block">
+                Formato & Range Taglie
               </label>
-              <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-2xl border border-slate-200/80 gap-1 select-none">
+              
+              <div className="grid grid-cols-3 p-1 bg-slate-200/70 rounded-xl gap-1 select-none">
                 <button
                   type="button"
-                  onClick={() => onSetNuovoProd({ ...nuovoProd, taglia_unica: false })}
-                  className={`py-2.5 px-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer truncate ${
-                    !nuovoProd.taglia_unica
+                  onClick={() => onSetNuovoProd({ 
+                    ...nuovoProd, 
+                    tipo_taglie: 'letterale', 
+                    taglia_min: 'XS', 
+                    taglia_max: 'XL',
+                    taglia_unica: false 
+                  })}
+                  className={`py-2 px-1 rounded-lg text-xs font-black transition-all text-center truncate cursor-pointer ${
+                    (nuovoProd.tipo_taglie || (nuovoProd.taglia_unica ? 'unica' : 'letterale')) === 'letterale'
                       ? 'bg-white text-[#002b80] shadow-2xs'
-                      : 'text-slate-500 hover:text-slate-900'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  <FontAwesomeIcon icon={faShirt} className="text-xs" />
-                  <span className="truncate">Taglie (6A-5XL)</span>
+                  4XS — 3XL
                 </button>
+
                 <button
                   type="button"
-                  onClick={() => onSetNuovoProd({ ...nuovoProd, taglia_unica: true })}
-                  className={`py-2.5 px-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer truncate ${
-                    nuovoProd.taglia_unica
+                  onClick={() => onSetNuovoProd({ 
+                    ...nuovoProd, 
+                    tipo_taglie: 'numerica', 
+                    taglia_min: '38', 
+                    taglia_max: '48',
+                    taglia_unica: false 
+                  })}
+                  className={`py-2 px-1 rounded-lg text-xs font-black transition-all text-center truncate cursor-pointer ${
+                    nuovoProd.tipo_taglie === 'numerica'
                       ? 'bg-white text-[#002b80] shadow-2xs'
-                      : 'text-slate-500 hover:text-slate-900'
+                      : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
-                  <FontAwesomeIcon icon={faCheck} className="text-xs" />
-                  <span className="truncate">Taglia Unica</span>
+                  32 — 56
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onSetNuovoProd({ 
+                    ...nuovoProd, 
+                    tipo_taglie: 'unica', 
+                    taglia_unica: true 
+                  })}
+                  className={`py-2 px-1 rounded-lg text-xs font-black transition-all text-center truncate cursor-pointer ${
+                    (nuovoProd.tipo_taglie === 'unica' || nuovoProd.taglia_unica)
+                      ? 'bg-white text-[#002b80] shadow-2xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Unica
                 </button>
               </div>
+
+              {nuovoProd.tipo_taglie !== 'unica' && !nuovoProd.taglia_unica && (
+                <div className="pt-2 border-t border-slate-200/80 grid grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">Da</label>
+                    <select
+                      value={nuovoProd.taglia_min || (nuovoProd.tipo_taglie === 'numerica' ? '38' : 'XS')}
+                      onChange={e => onSetNuovoProd({ ...nuovoProd, taglia_min: e.target.value })}
+                      className="w-full h-9 bg-white border border-slate-200 rounded-lg px-2 text-xs font-black text-slate-800 focus:outline-none focus:border-[#002b80]"
+                    >
+                      {(nuovoProd.tipo_taglie === 'numerica' ? SCALA_NUMERICA : SCALA_LETTERALE).map(t => (
+                        <option key={`min-${t}`} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">A</label>
+                    <select
+                      value={nuovoProd.taglia_max || (nuovoProd.tipo_taglie === 'numerica' ? '48' : 'XL')}
+                      onChange={e => onSetNuovoProd({ ...nuovoProd, taglia_max: e.target.value })}
+                      className="w-full h-9 bg-white border border-slate-200 rounded-lg px-2 text-xs font-black text-slate-800 focus:outline-none focus:border-[#002b80]"
+                    >
+                      {(nuovoProd.tipo_taglie === 'numerica' ? SCALA_NUMERICA : SCALA_LETTERALE).map(t => (
+                        <option key={`max-${t}`} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div>
@@ -1359,9 +1441,15 @@ export default function PannelloAdmin({
                         <div className="truncate">
                           <div className="flex items-center gap-2 flex-wrap">
                             <h4 className="font-black text-slate-900 text-sm sm:text-base leading-tight truncate">{p.nome}</h4>
-                            {p.taglia_unica && (
+                            {p.taglia_unica ? (
                               <span className="text-xs font-black uppercase px-2 py-0.5 bg-blue-50 text-[#002b80] border border-blue-200 rounded-md">
                                 Unica
+                              </span>
+                            ) : (
+                              <span className="text-xs font-black uppercase px-2 py-0.5 bg-slate-100 text-slate-700 border border-slate-200 rounded-md">
+                                {Array.isArray(p.taglie_disponibili) && p.taglie_disponibili.length > 0
+                                  ? `${p.taglie_disponibili[0]} — ${p.taglie_disponibili[p.taglie_disponibili.length - 1]}`
+                                  : "Standard"}
                               </span>
                             )}
                             {!visibile && (
@@ -1379,7 +1467,12 @@ export default function PannelloAdmin({
                       <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
                         <button
                           type="button"
-                          onClick={() => setProdottoInModifica(p)}
+                          onClick={() => setProdottoInModifica({
+                            ...p,
+                            tipo_taglie: p.tipo_taglie || (p.taglia_unica ? 'unica' : (p.taglie_disponibili?.[0]?.match(/^\d+$/) ? 'numerica' : 'letterale')),
+                            taglia_min: p.taglia_min || (Array.isArray(p.taglie_disponibili) ? p.taglie_disponibili[0] : (p.tipo_taglie === 'numerica' ? '38' : 'XS')),
+                            taglia_max: p.taglia_max || (Array.isArray(p.taglie_disponibili) ? p.taglie_disponibili[p.taglie_disponibili.length - 1] : (p.tipo_taglie === 'numerica' ? '48' : 'XL'))
+                          })}
                           className="h-9 w-9 sm:w-auto sm:px-3 text-xs sm:text-sm font-bold text-[#002b80] hover:bg-blue-50 border border-blue-200 rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
                           title="Modifica articolo"
                         >
@@ -1400,7 +1493,6 @@ export default function PannelloAdmin({
                           <span>{visibile ? "Nascondi" : "Mostra"}</span>
                         </button>
 
-                        {/* TASTO ELIMINA ARTICOLO - TIPOGRAFIA ALLINEATA */}
                         <button 
                           type="button"
                           onClick={() => onEliminaProdotto(p.id)} 
@@ -1531,41 +1623,99 @@ export default function PannelloAdmin({
                   type="text" 
                   value={prodottoInModifica.immagine_url || ''} 
                   onChange={e => setProdottoInModifica({...prodottoInModifica, immagine_url: e.target.value})} 
-                  placeholder="https://..."
+                  placeholder="https://..." 
                   className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3.5 text-xs sm:text-sm text-slate-800 focus:outline-none focus:border-[#002b80]"
                 />
               </div>
 
-              <div>
-                <label className="text-xs font-black uppercase tracking-wider text-slate-700 mb-1.5 block">
-                  Formato Taglia
+              {/* FORMATO E RANGE TAGLIE MODALE */}
+              <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-3">
+                <label className="text-xs font-black uppercase tracking-wider text-slate-700 block">
+                  Formato & Range Taglie
                 </label>
-                <div className="grid grid-cols-2 p-1 bg-slate-100 rounded-2xl border border-slate-200/80 gap-1 select-none">
+                
+                <div className="grid grid-cols-3 p-1 bg-slate-200/70 rounded-xl gap-1 select-none">
                   <button
                     type="button"
-                    onClick={() => setProdottoInModifica({ ...prodottoInModifica, taglia_unica: false })}
-                    className={`py-2 px-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer truncate ${
-                      !prodottoInModifica.taglia_unica
+                    onClick={() => setProdottoInModifica({ 
+                      ...prodottoInModifica, 
+                      tipo_taglie: 'letterale', 
+                      taglia_min: 'XS', 
+                      taglia_max: 'XL',
+                      taglia_unica: false 
+                    })}
+                    className={`py-2 px-1 rounded-lg text-xs font-black transition-all text-center truncate cursor-pointer ${
+                      (prodottoInModifica.tipo_taglie || (prodottoInModifica.taglia_unica ? 'unica' : 'letterale')) === 'letterale'
                         ? 'bg-white text-[#002b80] shadow-2xs'
-                        : 'text-slate-500 hover:text-slate-900'
+                        : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    <FontAwesomeIcon icon={faShirt} className="text-xs" />
-                    <span className="truncate">Taglie (6A-5XL)</span>
+                    4XS — 3XL
                   </button>
+
                   <button
                     type="button"
-                    onClick={() => setProdottoInModifica({ ...prodottoInModifica, taglia_unica: true })}
-                    className={`py-2 px-2 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer truncate ${
-                      prodottoInModifica.taglia_unica
+                    onClick={() => setProdottoInModifica({ 
+                      ...prodottoInModifica, 
+                      tipo_taglie: 'numerica', 
+                      taglia_min: '38', 
+                      taglia_max: '48',
+                      taglia_unica: false 
+                    })}
+                    className={`py-2 px-1 rounded-lg text-xs font-black transition-all text-center truncate cursor-pointer ${
+                      prodottoInModifica.tipo_taglie === 'numerica'
                         ? 'bg-white text-[#002b80] shadow-2xs'
-                        : 'text-slate-500 hover:text-slate-900'
+                        : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    <FontAwesomeIcon icon={faCheck} className="text-xs" />
-                    <span className="truncate">Taglia Unica</span>
+                    32 — 56
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setProdottoInModifica({ 
+                      ...prodottoInModifica, 
+                      tipo_taglie: 'unica', 
+                      taglia_unica: true 
+                    })}
+                    className={`py-2 px-1 rounded-lg text-xs font-black transition-all text-center truncate cursor-pointer ${
+                      (prodottoInModifica.tipo_taglie === 'unica' || prodottoInModifica.taglia_unica)
+                        ? 'bg-white text-[#002b80] shadow-2xs'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Unica
                   </button>
                 </div>
+
+                {prodottoInModifica.tipo_taglie !== 'unica' && !prodottoInModifica.taglia_unica && (
+                  <div className="pt-2 border-t border-slate-200/80 grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">Da</label>
+                      <select
+                        value={prodottoInModifica.taglia_min || (prodottoInModifica.tipo_taglie === 'numerica' ? '38' : 'XS')}
+                        onChange={e => setProdottoInModifica({ ...prodottoInModifica, taglia_min: e.target.value })}
+                        className="w-full h-9 bg-white border border-slate-200 rounded-lg px-2 text-xs font-black text-slate-800 focus:outline-none focus:border-[#002b80]"
+                      >
+                        {(prodottoInModifica.tipo_taglie === 'numerica' ? SCALA_NUMERICA : SCALA_LETTERALE).map(t => (
+                          <option key={`mod-min-${t}`} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">A</label>
+                      <select
+                        value={prodottoInModifica.taglia_max || (prodottoInModifica.tipo_taglie === 'numerica' ? '48' : 'XL')}
+                        onChange={e => setProdottoInModifica({ ...prodottoInModifica, taglia_max: e.target.value })}
+                        className="w-full h-9 bg-white border border-slate-200 rounded-lg px-2 text-xs font-black text-slate-800 focus:outline-none focus:border-[#002b80]"
+                      >
+                        {(prodottoInModifica.tipo_taglie === 'numerica' ? SCALA_NUMERICA : SCALA_LETTERALE).map(t => (
+                          <option key={`mod-max-${t}`} value={t}>{t}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* PERSONALIZZAZIONI MODALE */}

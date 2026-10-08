@@ -7,7 +7,7 @@ import {
   faTriangleExclamation
 } from '@fortawesome/free-solid-svg-icons';
 
-const TAGLIE = ["6A", "8A", "10A", "XXS", "XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL", "5XL"];
+const TAGLIE_DEFAULT = ["4XS", "3XS", "2XS", "XS", "S", "M", "L", "XL", "2XL", "3XL"];
 const NUMERI_CALOTTA = Array.from({ length: 15 }, (_, i) => i + 1);
 
 export default function ProdottoCard({
@@ -17,7 +17,26 @@ export default function ProdottoCard({
   settoreUtente = 'pallanuoto',
   onZoomFoto
 }) {
-  const [taglia, setTaglia] = useState(prodotto.taglia_unica ? "Taglia Unica" : "M");
+  const listaTaglieDisponibili = useMemo(() => {
+    if (prodotto.taglia_unica) return ["Taglia Unica"];
+    if (Array.isArray(prodotto.taglie_disponibili) && prodotto.taglie_disponibili.length > 0) {
+      return prodotto.taglie_disponibili;
+    }
+    return TAGLIE_DEFAULT;
+  }, [prodotto]);
+
+  // Stato della taglia selezionata manualmente dall'utente
+  const [tagliaSelezionata, setTagliaSelezionata] = useState(null);
+
+  // Calcolo derivato al volo: zero useEffect, zero cascading re-renders
+  const taglia = useMemo(() => {
+    if (prodotto.taglia_unica) return "Taglia Unica";
+    if (tagliaSelezionata && listaTaglieDisponibili.includes(tagliaSelezionata)) {
+      return tagliaSelezionata;
+    }
+    return listaTaglieDisponibili[0] || "M";
+  }, [prodotto.taglia_unica, tagliaSelezionata, listaTaglieDisponibili]);
+
   const [atletaSceltoManualmente, setAtletaSceltoManualmente] = useState(null);
   const [nomePersonalizzato, setNomePersonalizzato] = useState('');
   const [numeroPersonalizzato, setNumeroPersonalizzato] = useState('');
@@ -175,13 +194,15 @@ export default function ProdottoCard({
           </span>
         </div>
 
-        {/* Titolo e Formato (Altezza fissa min-h per allineamento tra card) */}
+        {/* Titolo e Formato */}
         <div className="min-h-[46px]">
           <h3 className="text-base font-black text-slate-900 leading-tight">
             {prodotto.nome}
           </h3>
           <span className="text-xs font-semibold text-slate-400 block mt-0.5">
-            {prodotto.taglia_unica ? "Formato Taglia Unica" : "Varie Taglie (6A-5XL)"}
+            {prodotto.taglia_unica 
+              ? "Formato Taglia Unica" 
+              : `Disponibile (${listaTaglieDisponibili[0]} — ${listaTaglieDisponibili[listaTaglieDisponibili.length - 1]})`}
           </span>
         </div>
       </div>
@@ -224,10 +245,10 @@ export default function ProdottoCard({
             <select
               disabled={!haProfili}
               value={taglia}
-              onChange={e => setTaglia(e.target.value)}
+              onChange={e => setTagliaSelezionata(e.target.value)}
               className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none focus:border-[#002b80] cursor-pointer disabled:opacity-50"
             >
-              {TAGLIE.map(t => (
+              {listaTaglieDisponibili.map(t => (
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>
