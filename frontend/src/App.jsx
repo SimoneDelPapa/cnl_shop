@@ -1132,9 +1132,9 @@ export default function App() {
     XLSX.utils.book_append_sheet(wb, ws1, "Riepilogo Taglie");
 
     // ========================================================
-    // FOGLIO 2: PERSONALIZZAZIONI RAGGRUPPATE PER ARTICOLO (SENZA RIGHE VUOTE)
+    // FOGLIO 2: PERSONALIZZAZIONI RAGGRUPPATE PER ARTICOLO (SENZA NOME PROFILO)
     // ========================================================
-    const NUM_COLS_2 = 5;
+    const NUM_COLS_2 = 4;
     const dataWs2 = [
       [{ v: `CIRCOLO NUOTO LUCCA - ${nomeSettoreTitolo}`, s: styleBanner }, ...Array(NUM_COLS_2 - 1).fill({ v: "", s: styleBanner })]
     ];
@@ -1203,7 +1203,6 @@ export default function App() {
 
         dataWs2.push([
           { v: "Taglia", s: styleHeaderCol },
-          { v: "Nome Profilo", s: styleHeaderCol },
           { v: "Nome Stampato", s: articoloUsaNome ? styleHeaderTotal : styleHeaderCol },
           { v: "N° Calotta", s: articoloUsaNumero ? styleHeaderTotal : styleHeaderCol },
           { v: "Colore Calotta", s: articoloUsaColore ? styleHeaderTotal : styleHeaderCol }
@@ -1227,7 +1226,6 @@ export default function App() {
 
           dataWs2.push([
             { v: art.taglia || "Taglia Unica", s: styleCella(alt, "center", true) },
-            { v: art.atleta || "-", s: styleCella(alt, "left") },
             { v: valoreNome, s: styleCella(alt, "center", articoloUsaNome && valoreNome !== "-", !articoloUsaNome) },
             { v: valoreNumero, s: styleCella(alt, "center", articoloUsaNumero && valoreNumero !== "-", !articoloUsaNumero) },
             { v: valoreColore, s: styleCella(alt, "center", articoloUsaColore && valoreColore !== "-", !articoloUsaColore) }
@@ -1243,7 +1241,6 @@ export default function App() {
     ws2['!merges'] = mergesWs2;
     ws2['!cols'] = [
       { wch: 14 },
-      { wch: 26 },
       { wch: 32 },
       { wch: 16 },
       { wch: 20 }
