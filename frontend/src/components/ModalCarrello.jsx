@@ -11,7 +11,6 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { faPaypal } from '@fortawesome/free-brands-svg-icons';
 
-const TAGLIE = ["Taglia Unica", "6A", "8A", "10A", "XXS", "XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL", "5XL"];
 const NUMERI_CALOTTA = Array.from({ length: 15 }, (_, i) => i + 1);
 
 export default function ModalCarrello({
@@ -272,7 +271,7 @@ export default function ModalCarrello({
         </div>
       </div>
 
-      {/* POPUP SUB-MODALE PER MODIFICARE IL CAPO DEL CARRELLO (SALVA FULL-WIDTH SENZA ANNULLA E SENZA CHECK) */}
+      {/* POPUP SUB-MODALE PER MODIFICARE IL CAPO DEL CARRELLO */}
       {itemInModifica && (
         <div 
           className="fixed inset-0 z-60 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-3.5 sm:p-4 animate-in fade-in duration-150 overflow-y-auto"
@@ -335,15 +334,61 @@ export default function ModalCarrello({
                   <label className="text-[10px] font-black uppercase tracking-wider text-slate-600 block mb-1">
                     Taglia
                   </label>
-                  <select
-                    value={itemInModifica.taglia || 'M'}
-                    onChange={e => setItemInModifica({ ...itemInModifica, taglia: e.target.value })}
-                    className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none focus:border-[#002b80] cursor-pointer"
-                  >
-                    {TAGLIE.filter(t => t !== "Taglia Unica").map(t => (
-                      <option key={t} value={t}>Taglia: {t}</option>
-                    ))}
-                  </select>
+                  {(() => {
+                    const taglieDisponibili = itemInModifica.schedaCatalogo?.taglie_disponibili || 
+                      itemInModifica.taglie_disponibili || 
+                      [itemInModifica.taglia];
+
+                    const haJunior = taglieDisponibili.some(t => t.startsWith("Junior "));
+                    const haDonna = taglieDisponibili.some(t => t.startsWith("Donna "));
+                    const haSenior = taglieDisponibili.some(t => t.startsWith("Senior "));
+                    const haUomo = taglieDisponibili.some(t => t.startsWith("Uomo "));
+
+                    return (
+                      <select
+                        value={itemInModifica.taglia || taglieDisponibili[0]}
+                        onChange={e => setItemInModifica({ ...itemInModifica, taglia: e.target.value })}
+                        className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none focus:border-[#002b80] cursor-pointer"
+                      >
+                        {haJunior || haDonna || haSenior || haUomo ? (
+                          <>
+                            {haJunior && (
+                              <optgroup label="JUNIOR">
+                                {taglieDisponibili.filter(t => t.startsWith("Junior ")).map(t => (
+                                  <option key={t} value={t}>{t.replace("Junior ", "")}</option>
+                                ))}
+                              </optgroup>
+                            )}
+                            {haDonna && (
+                              <optgroup label="DONNA">
+                                {taglieDisponibili.filter(t => t.startsWith("Donna ")).map(t => (
+                                  <option key={t} value={t}>{t.replace("Donna ", "")}</option>
+                                ))}
+                              </optgroup>
+                            )}
+                            {haSenior && (
+                              <optgroup label="SENIOR">
+                                {taglieDisponibili.filter(t => t.startsWith("Senior ")).map(t => (
+                                  <option key={t} value={t}>{t.replace("Senior ", "")}</option>
+                                ))}
+                              </optgroup>
+                            )}
+                            {haUomo && (
+                              <optgroup label="UOMO">
+                                {taglieDisponibili.filter(t => t.startsWith("Uomo ")).map(t => (
+                                  <option key={t} value={t}>{t.replace("Uomo ", "")}</option>
+                                ))}
+                              </optgroup>
+                            )}
+                          </>
+                        ) : (
+                          taglieDisponibili.map(t => (
+                            <option key={t} value={t}>{t}</option>
+                          ))
+                        )}
+                      </select>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -450,7 +495,7 @@ export default function ModalCarrello({
                 </div>
               )}
 
-              {/* PULSANTE SALVA MODIFICHE A LARGHEZZA INTERA SENZA ICONA CHECK E SENZA ANNULLA */}
+              {/* PULSANTE SALVA MODIFICHE */}
               <div className="pt-3.5 mt-2 border-t border-slate-100 shrink-0">
                 <button
                   type="submit"

@@ -26,11 +26,15 @@ import {
   faLock, 
   faSignature, 
   faHashtag, 
-  faPalette 
+  faPalette,
+  faCartPlus,
+  faCartShopping,
+  faUsers,
+  faUserPlus,
 } from '@fortawesome/free-solid-svg-icons';
 
-// Importa dal file utility (rimuove l'errore ESLint)
-import { SCALA_NUMERICA, SCALA_LETTERALE, generaRangeTaglie } from '../utils/taglie';
+import { getOpzioniScaleSettore, getTaglieByScalaId } from '../utils/taglie';
+import ModalCreaOrdineAdmin from './ModalCreaOrdineAdmin';
 
 export default function PannelloAdmin({
   adminTab = 'ordini',
@@ -49,8 +53,9 @@ export default function PannelloAdmin({
   onSetFiltroStato,
   ordiniRaggruppati = [],
   tuttiGliOrdini = [],
-  ordiniInAttesaCount,
-  invioProduzioneInCorso,
+  tuttiGliUtenti = [],
+  ordiniInAttesaCount = 0,
+  invioProduzioneInCorso = false,
   onInviaProduzione,
   onImpostaProntiRitiro,
   onEsportaCsv,
@@ -67,7 +72,7 @@ export default function PannelloAdmin({
   onRimuoviFile,
   uploadingImage,
   onCreaProdotto,
-  prodotti,
+  prodotti = [],
   onEliminaProdotto,
   onModificaProdotto,
   onToggleVisibilitaProdotto,
@@ -75,7 +80,15 @@ export default function PannelloAdmin({
   onInviaSollecitoSingolo,
   settoreUtente = 'pallanuoto',
   categorieSettore = [],
-  onZoomFoto
+  onZoomFoto,
+  onCreaOrdinePerUtente,
+  onModificaProfiloUtente,
+  onAggiungiProfiloUtente,
+  onEliminaProfiloUtente,
+  onEliminaAccountUtente,
+  onModificaAccountUtente,
+  mostraMessaggio,
+  chiediConferma
 }) {
   const isNuoto = settoreUtente === 'nuoto';
 
@@ -83,18 +96,35 @@ export default function PannelloAdmin({
   const [utentiEspansi, setUtentiEspansi] = useState(() => new Set());
   const [mostraAnteprimaCatalogo, setMostraAnteprimaCatalogo] = useState(false);
 
-  // STATI ACCORDION CATEGORIE ANNIDATE
+  // ACCORDION CATEGORIE ANNIDATE
   const [categorieEspanse, setCategorieEspanse] = useState(() => new Set());
   const [profiliCategoriaEspansi, setProfiliCategoriaEspansi] = useState(() => new Set());
   const [ricercaCategorie, setRicercaCategorie] = useState('');
+  const [ricercaUtentiTab, setRicercaUtentiTab] = useState('');
 
+  // ACCORDION UTENTI
+  const [accountEspansi, setAccountEspansi] = useState(() => new Set());
+
+  // MODALE SELEZIONE PER TIPOLOGIA (Lavorazione / Pronti Ritiro)
   const [modalSelezione, setModalSelezione] = useState(null);
   const [tipologieSelezionate, setTipologieSelezionate] = useState(() => new Set());
 
-  // SCROLL LOCK PER I MODALI INTERNI DEL PANNELLO ADMIN
+  // MODALI ADMIN: CREA ORDINE, GESTIONE PROFILI, GESTIONE ACCOUNT
+  const [accountPerOrdine, setAccountPerOrdine] = useState(null);
+  const [profiloInModifica, setProfiloInModifica] = useState(null);
+  const [profiloInCreazione, setProfiloInCreazione] = useState(null);
+  const [accountInModifica, setAccountInModifica] = useState(null);
+
+  // SCROLL LOCK SU TUTTI I MODALI
   useEffect(() => {
     const isQualsiasiModalAperto = Boolean(
-      modalSelezione || prodottoInModifica || mostraAnteprimaCatalogo
+      modalSelezione || 
+      prodottoInModifica || 
+      mostraAnteprimaCatalogo || 
+      accountPerOrdine || 
+      profiloInModifica || 
+      profiloInCreazione || 
+      accountInModifica
     );
 
     if (isQualsiasiModalAperto) {
@@ -112,7 +142,7 @@ export default function PannelloAdmin({
         if (top) window.scrollTo(0, parseInt(top || '0', 10) * -1);
       };
     }
-  }, [modalSelezione, prodottoInModifica, mostraAnteprimaCatalogo]);
+  }, [modalSelezione, prodottoInModifica, mostraAnteprimaCatalogo, accountPerOrdine, profiloInModifica, profiloInCreazione, accountInModifica]);
 
   const ordiniInLavorazioneCount = useMemo(() => {
     return (tuttiGliOrdini || []).filter(o => o.stato_pagamento === "In lavorazione").length;
@@ -187,7 +217,7 @@ export default function PannelloAdmin({
       }
     });
 
-    if (modalSelezione === 'lavorazione') {
+    if (modalSelezione === 'lavorazione' && onInviaProduzione) {
       onInviaProduzione(ordiniScelti);
     } else if (modalSelezione === 'pronto_ritiro' && onImpostaProntiRitiro) {
       onImpostaProntiRitiro(ordiniScelti);
@@ -201,6 +231,15 @@ export default function PannelloAdmin({
       if (nuovoSet.has(email)) nuovoSet.delete(email);
       else nuovoSet.add(email);
       return nuovoSet;
+    });
+  };
+
+  const toggleEspandiAccount = (id) => {
+    setAccountEspansi(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
     });
   };
 
@@ -234,26 +273,26 @@ export default function PannelloAdmin({
   const salvaModificheArticolo = (e) => {
     e.preventDefault();
     if (!prodottoInModifica.nome.trim() || !prodottoInModifica.prezzo) {
-      alert("Nome e prezzo sono obbligatori.");
+      if (mostraMessaggio) mostraMessaggio("Campi Mancanti", "Nome e prezzo sono obbligatori.", "warning");
       return;
     }
-    const tipo = prodottoInModifica.tipo_taglie || (prodottoInModifica.taglia_unica ? 'unica' : 'letterale');
-    const minVal = prodottoInModifica.taglia_min || (tipo === 'numerica' ? '38' : 'XS');
-    const maxVal = prodottoInModifica.taglia_max || (tipo === 'numerica' ? '48' : 'XL');
-    const taglieDisponibili = generaRangeTaglie(tipo, minVal, maxVal);
+
+    const settoreCapo = prodottoInModifica.disciplina || settoreUtente;
+    const opzioniSettore = getOpzioniScaleSettore(settoreCapo);
+    const scalaId = prodottoInModifica.scala_taglie_id || opzioniSettore[0].id;
+    const taglieDisponibili = getTaglieByScalaId(scalaId);
+    const isUnica = taglieDisponibili.length === 1 && taglieDisponibili[0] === "Taglia Unica";
 
     onModificaProdotto(prodottoInModifica.id, {
       nome: prodottoInModifica.nome.trim(),
       prezzo: parseFloat(prodottoInModifica.prezzo) || 0,
       immagine_url: prodottoInModifica.immagine_url || null,
-      taglia_unica: Boolean(tipo === 'unica'),
-      tipo_taglie: tipo,
-      taglia_min: tipo === 'unica' ? null : minVal,
-      taglia_max: tipo === 'unica' ? null : maxVal,
+      scala_taglie_id: scalaId,
+      taglia_unica: isUnica,
       taglie_disponibili: taglieDisponibili,
       personalizzabile_nome: Boolean(prodottoInModifica.personalizzabile_nome),
-      personalizzabile_numero: isNuoto ? false : Boolean(prodottoInModifica.personalizzabile_numero),
-      personalizzabile_colore: isNuoto ? false : Boolean(prodottoInModifica.personalizzabile_colore)
+      personalizzabile_numero: (settoreCapo === 'nuoto') ? false : Boolean(prodottoInModifica.personalizzabile_numero),
+      personalizzabile_colore: (settoreCapo === 'nuoto') ? false : Boolean(prodottoInModifica.personalizzabile_colore)
     });
     setProdottoInModifica(null);
   };
@@ -327,6 +366,7 @@ export default function PannelloAdmin({
               nomeCompleto: nomeProfilo,
               acquirente: gruppo.acquirente,
               email: gruppo.email,
+              utenteId: ord.utente_id,
               articoli: []
             });
           }
@@ -341,7 +381,8 @@ export default function PannelloAdmin({
             statoOrdine: statoReale,
             completato: isConsegnato,
             pagato: Boolean(ord.pagato),
-            dataCreazione: ord.creato_il
+            dataCreazione: ord.creato_il,
+            utenteIdPadre: ord.utente_id
           });
         });
       });
@@ -389,6 +430,224 @@ export default function PannelloAdmin({
     });
     return tot;
   }, [tipologieAttiveModal, tipologieSelezionate]);
+
+  // Lista normalizzata di tutti gli account registrati
+  const listaAccountCompleta = useMemo(() => {
+    const isN = settoreUtente === 'nuoto';
+
+    return (tuttiGliUtenti || []).map(u => {
+      const atletiRaw = isN
+        ? (u.atleti_nuoto || [])
+        : (u.atleti_pallanuoto || u.atleti || []);
+
+      const carrelloRaw = isN
+        ? (u.carrello_nuoto || [])
+        : (u.carrello_pallanuoto || u.carrello || []);
+
+      const profili = (Array.isArray(atletiRaw) ? atletiRaw : []).map(a => {
+        if (typeof a === 'object' && a !== null) {
+          const nomeComp = `${a.nome || ''} ${a.cognome || ''}`.trim();
+          return {
+            nome: a.nome || '',
+            cognome: a.cognome || '',
+            nomeCompleto: nomeComp || 'Profilo Senza Nome',
+            categoria: a.categoria || 'Extra'
+          };
+        }
+        return {
+          nome: String(a),
+          cognome: '',
+          nomeCompleto: String(a),
+          categoria: 'Extra'
+        };
+      });
+
+      const carrello = Array.isArray(carrelloRaw) ? carrelloRaw : [];
+      const totaleCarrello = carrello.reduce((acc, c) => acc + Number(c.prezzo || 0), 0);
+
+      const nome = u.nome || '';
+      const cognome = u.cognome || '';
+      const nomeCompleto = `${nome} ${cognome}`.trim() || u.email || 'Utente';
+
+      return {
+        id: u.id,
+        email: u.email || '',
+        nome,
+        cognome,
+        nomeCompleto,
+        profili,
+        carrello,
+        totaleCarrello
+      };
+    });
+  }, [tuttiGliUtenti, settoreUtente]);
+
+  // FILTRO SELETTIVO: Mostra solo account che hanno almeno un profilo nella disciplina attiva
+  const accountFiltrati = useMemo(() => {
+    const accountDelSettore = listaAccountCompleta.filter(u => Array.isArray(u.profili) && u.profili.length > 0);
+
+    const q = ricercaUtentiTab.toLowerCase().trim();
+    if (!q) return accountDelSettore;
+
+    return accountDelSettore.filter(u => 
+      u.nomeCompleto.toLowerCase().includes(q) ||
+      u.email.toLowerCase().includes(q) ||
+      u.profili.some(p => p.nomeCompleto.toLowerCase().includes(q) || p.categoria.toLowerCase().includes(q))
+    );
+  }, [listaAccountCompleta, ricercaUtentiTab]);
+
+  const haOrdiniPendentiProfilo = (nomeProfilo, emailAccount) => {
+    const pNome = (nomeProfilo || '').toLowerCase().trim();
+    const pEmail = (emailAccount || '').toLowerCase().trim();
+
+    return (tuttiGliOrdini || []).some(o => {
+      const matchEmail = (o.email_acquirente || '').toLowerCase().trim() === pEmail;
+      if (!matchEmail) return false;
+      if (o.stato_pagamento === "Annullato") return false;
+
+      const lista = Array.isArray(o.articoli) && o.articoli.length > 0 ? o.articoli : [o];
+      const appartieneAProfilo = lista.some(c => (c.atleta || o.atleta || '').toLowerCase().trim() === pNome);
+      if (!appartieneAProfilo) return false;
+
+      return (o.stato_pagamento === "In attesa" || o.stato_pagamento === "In lavorazione" || !o.pagato);
+    });
+  };
+
+  const haOrdiniPendentiAccount = (emailAccount, utenteId) => {
+    const pEmail = (emailAccount || '').toLowerCase().trim();
+
+    return (tuttiGliOrdini || []).some(o => {
+      const matchEmail = pEmail && (o.email_acquirente || '').toLowerCase().trim() === pEmail;
+      const matchUid = utenteId && o.utente_id === utenteId;
+      if (!matchEmail && !matchUid) return false;
+      if (o.stato_pagamento === "Annullato") return false;
+
+      return (o.stato_pagamento === "In attesa" || o.stato_pagamento === "In lavorazione" || !o.pagato);
+    });
+  };
+
+  // Funzione per estrarre in modo sicuro Nome e Cognome senza duplicazioni
+  const separaNomeCognome = (nomeRaw = '', cognomeRaw = '', nomeCompletoRaw = '') => {
+    const nomeComp = (nomeCompletoRaw || '').trim();
+    const cognome = (cognomeRaw || '').trim();
+    let nome = (nomeRaw || '').trim();
+
+    if (cognome && nome.toLowerCase().endsWith(cognome.toLowerCase())) {
+      nome = nome.slice(0, nome.length - cognome.length).trim();
+    } else if (!cognome && nomeComp) {
+      const parti = nomeComp.split(/\s+/);
+      nome = parti[0] || '';
+      return { nome, cognome: parti.slice(1).join(' ') };
+    }
+
+    return { nome: nome || nomeComp.split(/\s+/)[0] || '', cognome };
+  };
+
+  const handleRichiestaEliminaProfilo = (utenteId, prof, emailAccount) => {
+    if (haOrdiniPendentiProfilo(prof.nomeCompleto, emailAccount)) {
+      if (mostraMessaggio) {
+        mostraMessaggio(
+          "Eliminazione non consentita",
+          `Impossibile eliminare il profilo "${prof.nomeCompleto}": risultano ordini pendenti, in lavorazione o non ancora saldati a suo nome.`,
+          "warning"
+        );
+      }
+      return;
+    }
+
+    const eseguiEliminazione = () => {
+      if (onEliminaProfiloUtente) {
+        onEliminaProfiloUtente(utenteId, prof);
+      }
+    };
+
+    if (chiediConferma) {
+      chiediConferma(
+        "Elimina Profilo",
+        `Confermi l'eliminazione definitiva del profilo "${prof.nomeCompleto}" dal settore ${settoreUtente.toUpperCase()}?`,
+        eseguiEliminazione,
+        "Elimina Profilo"
+      );
+    }
+  };
+
+  const handleRichiestaEliminaAccount = (account) => {
+    if (haOrdiniPendentiAccount(account.email, account.id)) {
+      if (mostraMessaggio) {
+        mostraMessaggio(
+          "Eliminazione non consentita",
+          `Impossibile eliminare l'account "${account.nomeCompleto}": risultano ordini pendenti, in lavorazione o non ancora saldati.`,
+          "warning"
+        );
+      }
+      return;
+    }
+
+    const eseguiEliminazione = () => {
+      if (onEliminaAccountUtente) {
+        onEliminaAccountUtente(account.id);
+      }
+    };
+
+    if (chiediConferma) {
+      chiediConferma(
+        "Elimina Account",
+        `ATTENZIONE: Confermi l'eliminazione definitiva dell'account "${account.nomeCompleto}" (${account.email}) e di tutti i suoi profili? L'operazione è irreversibile.`,
+        eseguiEliminazione,
+        "Elimina Account"
+      );
+    }
+  };
+
+  const handleSalvaModificaProfilo = (e) => {
+    e.preventDefault();
+    if (!profiloInModifica || !onModificaProfiloUtente) return;
+    if (!profiloInModifica.nome.trim() || !profiloInModifica.cognome.trim()) {
+      if (mostraMessaggio) mostraMessaggio("Campi Mancanti", "Nome e cognome sono obbligatori.", "warning");
+      return;
+    }
+
+    onModificaProfiloUtente(profiloInModifica.utenteId, profiloInModifica.nomeVecchio, {
+      nome: profiloInModifica.nome.trim(),
+      cognome: profiloInModifica.cognome.trim(),
+      categoria: profiloInModifica.categoria
+    });
+
+    setProfiloInModifica(null);
+  };
+
+  const handleSalvaNuovoProfilo = (e) => {
+    e.preventDefault();
+    if (!profiloInCreazione || !onAggiungiProfiloUtente) return;
+    if (!profiloInCreazione.nome.trim() || !profiloInCreazione.cognome.trim()) {
+      if (mostraMessaggio) mostraMessaggio("Campi Mancanti", "Nome e cognome sono obbligatori.", "warning");
+      return;
+    }
+
+    onAggiungiProfiloUtente(profiloInCreazione.utenteId, {
+      nome: profiloInCreazione.nome.trim(),
+      cognome: profiloInCreazione.cognome.trim(),
+      categoria: profiloInCreazione.categoria || categorieSettore[0] || 'Extra'
+    });
+
+    setProfiloInCreazione(null);
+  };
+
+  const handleSalvaModificaAccount = (e) => {
+    e.preventDefault();
+    if (!accountInModifica || !onModificaAccountUtente) return;
+    if (!accountInModifica.nome.trim() || !accountInModifica.cognome.trim()) {
+      if (mostraMessaggio) mostraMessaggio("Campi Mancanti", "Nome e cognome sono obbligatori.", "warning");
+      return;
+    }
+
+    onModificaAccountUtente(accountInModifica.id, {
+      nome: accountInModifica.nome.trim(),
+      cognome: accountInModifica.cognome.trim()
+    });
+
+    setAccountInModifica(null);
+  };
 
   return (
     <div className="space-y-6">
@@ -566,7 +825,7 @@ export default function PannelloAdmin({
             </div>
           </div>
 
-          {/* CONTATORE CLIENTI & ESPANSIONE */}
+          {/* CONTATORE CLIENTI & ESPANSIONE SCHEDE */}
           {ordiniRaggruppati.length > 0 && (
             <div className="flex items-center justify-between text-xs sm:text-sm text-slate-500 px-2 font-bold">
               <span>{ordiniRaggruppati.length} {ordiniRaggruppati.length === 1 ? 'account cliente registrato' : 'account clienti registrati'}</span>
@@ -580,7 +839,7 @@ export default function PannelloAdmin({
             </div>
           )}
 
-          {/* LISTA ACCOUNT CLIENTI */}
+          {/* LISTA ACCOUNT CLIENTI NEGLI ORDINI */}
           <div className="space-y-4">
             {ordiniRaggruppati.length === 0 ? (
               <div className="p-16 text-center bg-white border border-slate-200/80 rounded-3xl shadow-xs">
@@ -643,7 +902,7 @@ export default function PannelloAdmin({
                         </div>
                       </div>
 
-                      <div className="flex items-center justify-between md:justify-end gap-4 shrink-0 pt-3 md:pt-0 border-t md:border-t-0 border-slate-100">
+                      <div className="flex items-center justify-between md:justify-end gap-3 shrink-0 pt-3 md:pt-0 border-t md:border-t-0 border-slate-100 flex-wrap">
                         {haDebito ? (
                           <div className="bg-amber-50 border border-amber-200 px-4 py-2 rounded-2xl text-right">
                             <span className="text-xs font-black uppercase tracking-wider text-amber-800 block">Da Saldare</span>
@@ -748,7 +1007,7 @@ export default function PannelloAdmin({
                                                 N° {capo.numeroPersonalizzato}
                                               </span>
                                             )}
-                                            {capo.colorePersonalizzato && (
+                                            {!isNuoto && capo.colorePersonalizzato && (capo.nomeProdotto || '').toLowerCase().includes('calotta') && (
                                               <span className="text-xs font-black text-[#002b80] bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-md">
                                                 {capo.colorePersonalizzato}
                                               </span>
@@ -838,7 +1097,7 @@ export default function PannelloAdmin({
       )}
 
       {/* ========================================================
-          TAB 2: RIEPILOGO CATEGORIE (ACCORDION A DOPPIA TENDINA ANNIDATA)
+          TAB 2: RIEPILOGO CATEGORIE (SENZA TASTO MODIFICA PROFILO)
          ======================================================== */}
       {adminTab === 'categorie' && (
         <div className="space-y-6 animate-in fade-in duration-150">
@@ -911,8 +1170,6 @@ export default function PannelloAdmin({
                         : 'border-slate-200/90 hover:border-slate-300 shadow-2xs'
                     }`}
                   >
-                    
-                    {/* LIVELLO 1: INTESTAZIONE CATEGORIA CLICCABILE A TENDINA */}
                     <div 
                       onClick={() => toggleCategoriaEspansa(categoria)}
                       className={`p-4 sm:p-5 flex items-center justify-between gap-3 cursor-pointer select-none transition-colors ${
@@ -941,7 +1198,6 @@ export default function PannelloAdmin({
                       </div>
                     </div>
 
-                    {/* LIVELLO 2: LISTA PROFILI DENTRO LA CATEGORIA */}
                     {isCatAperta && (
                       <div className="p-4 sm:p-6 space-y-3 bg-white animate-in slide-in-from-top-1 duration-150">
                         {profili.map((profilo, pIdx) => {
@@ -991,7 +1247,6 @@ export default function PannelloAdmin({
                                 </div>
                               </div>
 
-                              {/* LIVELLO 3: CAPI DEL SINGOLO PROFILO */}
                               {isProfAperto && (
                                 <div className="p-3 sm:p-4 pt-0 space-y-2.5 border-t border-slate-200/60 mt-1 animate-in slide-in-from-top-1 duration-150">
                                   {profilo.articoli.map((art, aIdx) => {
@@ -1005,7 +1260,6 @@ export default function PannelloAdmin({
                                         key={`cat-art-${aIdx}`}
                                         className="bg-white border border-slate-200/80 rounded-2xl p-3 sm:p-4 shadow-2xs hover:border-slate-300 transition-all flex flex-col gap-3"
                                       >
-                                        {/* RIGA 1: Immagine, Dettagli, Taglia e Personalizzazioni */}
                                         <div className="flex items-start gap-3 min-w-0">
                                           {art.immagine_url ? (
                                             <div 
@@ -1024,7 +1278,7 @@ export default function PannelloAdmin({
                                           <div className="min-w-0 flex-1 space-y-1">
                                             <div className="flex items-center gap-2 flex-wrap">
                                               <span className="font-black text-slate-900 text-sm leading-tight">{art.nomeProdotto}</span>
-                                              <span className="text-[10px] font-black uppercase text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded-md whitespace-nowrap">
+                                              <span className="text-[10px] font-black uppercase text-slate-700 bg-slate-100 border border-slate-200 px-2.5 py-0.5 rounded-md whitespace-nowrap">
                                                 Taglia: {art.taglia}
                                               </span>
                                             </div>
@@ -1032,17 +1286,17 @@ export default function PannelloAdmin({
                                             {(art.nomePersonalizzato || art.numeroPersonalizzato || art.colorePersonalizzato) && (
                                               <div className="flex items-center gap-1.5 pt-0.5 flex-wrap">
                                                 {art.nomePersonalizzato && (
-                                                  <span className="text-[10px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md whitespace-nowrap">
+                                                  <span className="text-[10px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-md whitespace-nowrap">
                                                     "{art.nomePersonalizzato}"
                                                   </span>
                                                 )}
                                                 {art.numeroPersonalizzato && (
-                                                  <span className="text-[10px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md whitespace-nowrap">
+                                                  <span className="text-[10px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-md whitespace-nowrap">
                                                     N° {art.numeroPersonalizzato}
                                                   </span>
                                                 )}
-                                                {art.colorePersonalizzato && (
-                                                  <span className="text-[10px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md whitespace-nowrap">
+                                                {!isNuoto && art.colorePersonalizzato && (art.nomeProdotto || '').toLowerCase().includes('calotta') && (
+                                                  <span className="text-[10px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-2.5 py-0.5 rounded-md whitespace-nowrap">
                                                     {art.colorePersonalizzato}
                                                   </span>
                                                 )}
@@ -1051,12 +1305,8 @@ export default function PannelloAdmin({
                                           </div>
                                         </div>
 
-                                        {/* RIGA 2: Badge di stato + Pulsante Consegna (Ottimizzato Mobile) */}
                                         <div className="pt-2 border-t border-slate-100/90 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
-                                          
-                                          {/* Box Stati Informativi */}
                                           <div className="flex items-center gap-2 w-full sm:w-auto">
-                                            {/* Badge Stato Produzione */}
                                             <span className={`flex-1 sm:flex-none justify-center h-8 px-2.5 text-[11px] font-black uppercase rounded-xl border flex items-center gap-1.5 whitespace-nowrap ${
                                               statoReale === 'Completato'
                                                 ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
@@ -1074,7 +1324,6 @@ export default function PannelloAdmin({
                                               <span className="truncate">{statoReale}</span>
                                             </span>
 
-                                            {/* Badge Stato Pagamento */}
                                             <span className={`flex-1 sm:flex-none justify-center h-8 px-2.5 text-[11px] font-black rounded-xl border flex items-center whitespace-nowrap ${
                                               isSaldato 
                                                 ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
@@ -1084,7 +1333,6 @@ export default function PannelloAdmin({
                                             </span>
                                           </div>
 
-                                          {/* Pulsante Azione Consegna (Full-width su mobile, auto su desktop) */}
                                           <button
                                             type="button"
                                             disabled={!puoConsegnare}
@@ -1168,94 +1416,51 @@ export default function PannelloAdmin({
               />
             </div>
 
-            {/* SELEZIONE SISTEMA TAGLIE E RANGE (3 OPZIONI) */}
-            <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-3">
-              <label className="text-xs font-black uppercase tracking-wider text-slate-700 block">
-                Formato & Range Taglie
-              </label>
-              
-              <div className="grid grid-cols-3 p-1 bg-slate-200/70 rounded-xl gap-1 select-none">
-                <button
-                  type="button"
-                  onClick={() => onSetNuovoProd({ 
-                    ...nuovoProd, 
-                    tipo_taglie: 'letterale', 
-                    taglia_min: 'XS', 
-                    taglia_max: 'XL',
-                    taglia_unica: false 
-                  })}
-                  className={`py-2 px-1 rounded-lg text-xs font-black transition-all text-center truncate cursor-pointer ${
-                    (nuovoProd.tipo_taglie || (nuovoProd.taglia_unica ? 'unica' : 'letterale')) === 'letterale'
-                      ? 'bg-white text-[#002b80] shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  4XS — 3XL
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => onSetNuovoProd({ 
-                    ...nuovoProd, 
-                    tipo_taglie: 'numerica', 
-                    taglia_min: '38', 
-                    taglia_max: '48',
-                    taglia_unica: false 
-                  })}
-                  className={`py-2 px-1 rounded-lg text-xs font-black transition-all text-center truncate cursor-pointer ${
-                    nuovoProd.tipo_taglie === 'numerica'
-                      ? 'bg-white text-[#002b80] shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  32 — 56
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => onSetNuovoProd({ 
-                    ...nuovoProd, 
-                    tipo_taglie: 'unica', 
-                    taglia_unica: true 
-                  })}
-                  className={`py-2 px-1 rounded-lg text-xs font-black transition-all text-center truncate cursor-pointer ${
-                    (nuovoProd.tipo_taglie === 'unica' || nuovoProd.taglia_unica)
-                      ? 'bg-white text-[#002b80] shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Unica
-                </button>
+            {/* SELEZIONE SCALA TAGLIE PER TIPOLOGIA DI ARTICOLO */}
+            <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-black uppercase tracking-wider text-slate-700 block">
+                  Tipologia Articolo & Taglie
+                </label>
+                <span className="text-[10px] font-black uppercase text-[#002b80] bg-blue-50 px-2 py-0.5 rounded">
+                  {isNuoto ? "Nuoto" : "Pallanuoto"}
+                </span>
               </div>
 
-              {nuovoProd.tipo_taglie !== 'unica' && !nuovoProd.taglia_unica && (
-                <div className="pt-2 border-t border-slate-200/80 grid grid-cols-2 gap-2.5">
+              {(() => {
+                const scaleSettore = getOpzioniScaleSettore(settoreUtente);
+                const scalaCorrente = nuovoProd.scala_taglie_id || scaleSettore[0].id;
+
+                return (
                   <div>
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">Da</label>
                     <select
-                      value={nuovoProd.taglia_min || (nuovoProd.tipo_taglie === 'numerica' ? '38' : 'XS')}
-                      onChange={e => onSetNuovoProd({ ...nuovoProd, taglia_min: e.target.value })}
-                      className="w-full h-9 bg-white border border-slate-200 rounded-lg px-2 text-xs font-black text-slate-800 focus:outline-none focus:border-[#002b80]"
+                      value={scalaCorrente}
+                      onChange={(e) => {
+                        const sceltaId = e.target.value;
+                        const lista = getTaglieByScalaId(sceltaId);
+                        const isUnica = lista.length === 1 && lista[0] === "Taglia Unica";
+                        onSetNuovoProd({
+                          ...nuovoProd,
+                          scala_taglie_id: sceltaId,
+                          taglia_unica: isUnica,
+                          taglie_disponibili: lista
+                        });
+                      }}
+                      className="w-full h-11 bg-white border border-slate-200 hover:border-[#002b80] focus:border-[#002b80] rounded-xl px-3 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none transition-colors cursor-pointer"
                     >
-                      {(nuovoProd.tipo_taglie === 'numerica' ? SCALA_NUMERICA : SCALA_LETTERALE).map(t => (
-                        <option key={`min-${t}`} value={t}>{t}</option>
+                      {scaleSettore.map(scala => (
+                        <option key={scala.id} value={scala.id}>
+                          {scala.label}
+                        </option>
                       ))}
                     </select>
+
+                    <p className="text-[11px] text-slate-400 font-semibold mt-1.5 px-0.5">
+                      Taglie disponibili: <strong className="text-slate-700">{getTaglieByScalaId(scalaCorrente).join(', ')}</strong>
+                    </p>
                   </div>
-                  <div>
-                    <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">A</label>
-                    <select
-                      value={nuovoProd.taglia_max || (nuovoProd.tipo_taglie === 'numerica' ? '48' : 'XL')}
-                      onChange={e => onSetNuovoProd({ ...nuovoProd, taglia_max: e.target.value })}
-                      className="w-full h-9 bg-white border border-slate-200 rounded-lg px-2 text-xs font-black text-slate-800 focus:outline-none focus:border-[#002b80]"
-                    >
-                      {(nuovoProd.tipo_taglie === 'numerica' ? SCALA_NUMERICA : SCALA_LETTERALE).map(t => (
-                        <option key={`max-${t}`} value={t}>{t}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
 
             <div>
@@ -1285,16 +1490,16 @@ export default function PannelloAdmin({
 
               {!fileImmagine && (
                 <input 
-                  type="text"
-                  value={nuovoProd.immagine_url}
-                  onChange={e => onSetNuovoProd({...nuovoProd, immagine_url: e.target.value})}
-                  placeholder="Oppure incolla URL..."
+                  type="text" 
+                  value={nuovoProd.immagine_url} 
+                  onChange={e => onSetNuovoProd({...nuovoProd, immagine_url: e.target.value})} 
+                  placeholder="Oppure incolla URL..." 
                   className="w-full mt-2.5 h-11 bg-slate-50 border border-slate-200 rounded-xl px-3.5 text-xs sm:text-sm text-slate-700 focus:outline-none focus:border-[#002b80]"
                 />
               )}
             </div>
 
-            {/* SEZIONE PERSONALIZZAZIONI */}
+            {/* PERSONALIZZAZIONI */}
             <div>
               <div className="flex items-center justify-between mb-2">
                 <label className="text-xs font-black uppercase tracking-wider text-slate-700 block">
@@ -1469,9 +1674,7 @@ export default function PannelloAdmin({
                           type="button"
                           onClick={() => setProdottoInModifica({
                             ...p,
-                            tipo_taglie: p.tipo_taglie || (p.taglia_unica ? 'unica' : (p.taglie_disponibili?.[0]?.match(/^\d+$/) ? 'numerica' : 'letterale')),
-                            taglia_min: p.taglia_min || (Array.isArray(p.taglie_disponibili) ? p.taglie_disponibili[0] : (p.tipo_taglie === 'numerica' ? '38' : 'XS')),
-                            taglia_max: p.taglia_max || (Array.isArray(p.taglie_disponibili) ? p.taglie_disponibili[p.taglie_disponibili.length - 1] : (p.tipo_taglie === 'numerica' ? '48' : 'XL'))
+                            scala_taglie_id: p.scala_taglie_id || (p.taglia_unica ? (isNuoto ? "nuoto_zaino" : "pn_zaino") : (isNuoto ? "nuoto_shorts" : "pn_shorts"))
                           })}
                           className="h-9 w-9 sm:w-auto sm:px-3 text-xs sm:text-sm font-bold text-[#002b80] hover:bg-blue-50 border border-blue-200 rounded-xl transition-colors flex items-center justify-center gap-1.5 cursor-pointer shrink-0"
                           title="Modifica articolo"
@@ -1513,7 +1716,310 @@ export default function PannelloAdmin({
         </div>
       )}
 
-      {/* MODALE ANTEPRIMA CATALOGO */}
+      {/* ========================================================
+          TAB 4: GESTIONE ACCOUNT & PROFILI ATLETI ("UTENTE")
+         ======================================================== */}
+      {adminTab === 'utenti' && (
+        <div className="space-y-6 animate-in fade-in duration-150">
+          
+          <div className="bg-white border border-slate-200/90 rounded-3xl p-5 sm:p-6 shadow-xs flex flex-col md:flex-row justify-between md:items-center gap-4">
+            <div className="flex items-center gap-3.5">
+              <div className="w-12 h-12 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center text-xl shadow-2xs shrink-0">
+                <FontAwesomeIcon icon={faUsers} />
+              </div>
+              <div>
+                <h3 className="text-lg sm:text-xl font-black text-slate-900 leading-tight">
+                  Gestione Utenti & Profili
+                </h3>
+                <p className="text-xs sm:text-sm font-bold text-slate-500 mt-0.5">
+                  Visualizza tutti gli account con profili registrati in {settoreUtente.toUpperCase()} ({accountFiltrati.length}) e i carrelli attivi
+                </p>
+              </div>
+            </div>
+
+            <div className="relative flex-1 md:w-80">
+              <FontAwesomeIcon icon={faMagnifyingGlass} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm pointer-events-none" />
+              <input 
+                type="text" 
+                value={ricercaUtentiTab} 
+                onChange={e => setRicercaUtentiTab(e.target.value)} 
+                placeholder="Cerca per email, nominativo o atleta..." 
+                className="h-11 w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-9 text-xs sm:text-sm font-bold text-slate-900 placeholder-slate-400 focus:outline-none focus:border-[#002b80] transition-all"
+              />
+              {ricercaUtentiTab && (
+                <button
+                  type="button"
+                  onClick={() => setRicercaUtentiTab('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center text-xs"
+                >
+                  <FontAwesomeIcon icon={faXmark} />
+                </button>
+              )}
+            </div>
+          </div>
+
+          {accountFiltrati.length === 0 ? (
+            <div className="p-16 text-center bg-white border border-slate-200/80 rounded-3xl shadow-xs">
+              <p className="text-sm font-bold text-slate-400 italic">
+                Nessun account con profili in {settoreUtente.toUpperCase()} trovato per i criteri di ricerca impostati.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {accountFiltrati.map(account => {
+                const isAperto = accountEspansi.has(account.id);
+
+                return (
+                  <div 
+                    key={account.id} 
+                    className={`bg-white border rounded-3xl transition-all overflow-hidden ${
+                      isAperto 
+                        ? 'border-slate-300 shadow-sm' 
+                        : 'border-slate-200/90 hover:border-slate-300 shadow-2xs'
+                    }`}
+                  >
+                    {/* INTESTAZIONE CLICCABILE ACCORDION */}
+                    <div 
+                      onClick={() => toggleEspandiAccount(account.id)}
+                      className={`p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 cursor-pointer select-none transition-colors ${
+                        isAperto ? 'bg-slate-50/80 border-b border-slate-200/80' : 'hover:bg-slate-50/40'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-sm font-black shrink-0 transition-colors ${
+                          isAperto ? 'bg-[#002b80] text-white shadow-2xs' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          <FontAwesomeIcon icon={isAperto ? faChevronUp : faChevronDown} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="text-base sm:text-lg font-black text-slate-900 truncate">
+                              {account.nomeCompleto}
+                            </h4>
+                            <span className="text-xs font-semibold text-slate-400 truncate">
+                              ({account.email})
+                            </span>
+                          </div>
+                          <span className="text-[11px] font-bold text-slate-500 block mt-0.5">
+                            {account.profili.length} {account.profili.length === 1 ? 'profilo' : 'profili'} • Carrello: {account.carrello.length} {account.carrello.length === 1 ? 'capo' : 'capi'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* TOOLBAR 4 ICON-BUTTONS IDENTICI */}
+                      <div 
+                        onClick={e => e.stopPropagation()} 
+                        className="flex items-center gap-2 shrink-0 self-end sm:self-auto"
+                      >
+                        {/* 1. AGGIUNGI PROFILO */}
+                        <button
+                          type="button"
+                          onClick={() => setProfiloInCreazione({
+                            utenteId: account.id,
+                            nome: '',
+                            cognome: '',
+                            categoria: categorieSettore[0] || 'Extra'
+                          })}
+                          className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 flex items-center justify-center text-sm transition-all shadow-2xs active:scale-[0.98] cursor-pointer"
+                          title="Aggiungi nuovo profilo atleta a questo account"
+                        >
+                          <FontAwesomeIcon icon={faUserPlus} />
+                        </button>
+
+                        {/* 2. CREA ORDINE */}
+                        <button
+                          type="button"
+                          onClick={() => setAccountPerOrdine(account)}
+                          className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 flex items-center justify-center text-sm transition-all shadow-2xs active:scale-[0.98] cursor-pointer"
+                          title="Crea ordine per questo account"
+                        >
+                          <FontAwesomeIcon icon={faCartPlus} />
+                        </button>
+
+                        {/* 3. MODIFICA ACCOUNT */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const { nome, cognome } = separaNomeCognome(account.nome, account.cognome, account.nomeCompleto);
+                            setAccountInModifica({
+                              id: account.id,
+                              nome,
+                              cognome,
+                              email: account.email
+                            });
+                          }}
+                          className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-blue-50 hover:bg-blue-100 text-[#002b80] border border-blue-200 flex items-center justify-center text-sm transition-all shadow-2xs active:scale-[0.98] cursor-pointer"
+                          title="Modifica nominativo account"
+                        >
+                          <FontAwesomeIcon icon={faPenToSquare} />
+                        </button>
+
+                        {/* 4. ELIMINA ACCOUNT */}
+                        <button
+                          type="button"
+                          onClick={() => handleRichiestaEliminaAccount(account)}
+                          className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 flex items-center justify-center text-sm transition-all shadow-2xs active:scale-[0.98] cursor-pointer"
+                          title="Elimina definitivamente l'account"
+                        >
+                          <FontAwesomeIcon icon={faTrashCan} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* CORPO ESPANSO */}
+                    {isAperto && (
+                      <div className="p-5 sm:p-6 space-y-5 bg-white animate-in slide-in-from-top-1 duration-150">
+                        
+                        {/* SEZIONE 1: PROFILI REGISTRATI */}
+                        <div>
+                          <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-2.5">
+                            Profili Registrati ({account.profili.length})
+                          </span>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                            {account.profili.map((prof, pIdx) => (
+                              <div 
+                                key={`acc-prof-${pIdx}`}
+                                className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3 flex items-center justify-between gap-2 hover:border-slate-300 transition-all"
+                              >
+                                <div className="min-w-0">
+                                  <span className="text-xs sm:text-sm font-black text-slate-900 truncate block">
+                                    {prof.nomeCompleto}
+                                  </span>
+                                  <span className="text-[10px] font-bold text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded-md inline-block mt-0.5">
+                                    {prof.categoria}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  {/* MODIFICA PROFILO */}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const { nome, cognome } = separaNomeCognome(prof.nome, prof.cognome, prof.nomeCompleto);
+                                      setProfiloInModifica({
+                                        utenteId: account.id,
+                                        nomeVecchio: prof.nomeCompleto,
+                                        nome,
+                                        cognome,
+                                        categoria: prof.categoria
+                                      });
+                                    }}
+                                    className="w-8 h-8 rounded-xl bg-white hover:bg-slate-100 text-[#002b80] border border-slate-200 flex items-center justify-center text-xs transition-colors cursor-pointer shadow-2xs"
+                                    title="Modifica dati del profilo"
+                                  >
+                                    <FontAwesomeIcon icon={faPenToSquare} />
+                                  </button>
+
+                                  {/* CESTINO PROFILO */}
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRichiestaEliminaProfilo(account.id, prof, account.email)}
+                                    className="w-8 h-8 rounded-xl bg-white hover:bg-red-50 text-red-600 border border-slate-200 hover:border-red-200 flex items-center justify-center text-xs transition-colors cursor-pointer shadow-2xs"
+                                    title="Elimina questo profilo"
+                                  >
+                                    <FontAwesomeIcon icon={faTrashCan} />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* SEZIONE 2: DETTAGLIO CAPI NEL CARRELLO ATTIVO */}
+                        <div className="pt-4 border-t border-slate-100">
+                          <div className="flex items-center justify-between mb-2.5">
+                            <div className="flex items-center gap-2">
+                              <FontAwesomeIcon icon={faCartShopping} className="text-xs text-[#002b80]" />
+                              <span className="text-[10px] font-black uppercase tracking-wider text-slate-700">
+                                Carrello Attivo ({account.carrello.length} {account.carrello.length === 1 ? 'capo' : 'capi'})
+                              </span>
+                            </div>
+                            {account.carrello.length > 0 && (
+                              <span className="text-xs font-black text-[#002b80] tabular-nums">
+                                Totale: €{account.totaleCarrello.toFixed(2)}
+                              </span>
+                            )}
+                          </div>
+
+                          {account.carrello.length === 0 ? (
+                            <p className="text-xs text-slate-400 italic">Il carrello di questo utente è vuoto.</p>
+                          ) : (
+                            <div className="space-y-2">
+                              {account.carrello.map((capo, cIdx) => (
+                                <div 
+                                  key={`cart-item-${account.id}-${cIdx}`}
+                                  className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-center justify-between gap-3"
+                                >
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    {capo.immagine_url ? (
+                                      <div 
+                                        onClick={() => onZoomFoto && onZoomFoto(capo.immagine_url, capo.nomeProdotto)}
+                                        className="w-11 h-11 rounded-xl bg-white border border-slate-200 p-0.5 flex items-center justify-center shrink-0 cursor-zoom-in"
+                                      >
+                                        <img src={capo.immagine_url} alt="" className="w-full h-full object-contain" />
+                                      </div>
+                                    ) : (
+                                      <div className="w-11 h-11 rounded-xl bg-white border border-slate-200 text-slate-300 flex items-center justify-center shrink-0 text-sm">
+                                        <FontAwesomeIcon icon={faShirt} />
+                                      </div>
+                                    )}
+                                    <div className="min-w-0">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="text-xs sm:text-sm font-black text-slate-900 truncate">
+                                          {capo.nomeProdotto}
+                                        </span>
+                                        <span className="text-[10px] font-black uppercase text-slate-600 bg-white border border-slate-200 px-2 py-0.5 rounded">
+                                          Taglia: {capo.taglia}
+                                        </span>
+                                      </div>
+                                      <span className="text-[11px] font-bold text-slate-500 block mt-0.5 truncate">
+                                        Intestato a: <strong className="text-slate-800">{capo.atleta || 'Profilo'}</strong>
+                                      </span>
+                                      {(capo.nomePersonalizzato || capo.numeroPersonalizzato || capo.colorePersonalizzato) && (
+                                        <div className="flex items-center gap-1 mt-1 flex-wrap">
+                                          {capo.nomePersonalizzato && (
+                                            <span className="text-[9px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-1.5 py-0.2 rounded">
+                                              "{capo.nomePersonalizzato}"
+                                            </span>
+                                          )}
+                                          {capo.numeroPersonalizzato && (
+                                            <span className="text-[9px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-1.5 py-0.2 rounded">
+                                              N° {capo.numeroPersonalizzato}
+                                            </span>
+                                          )}
+                                          {capo.colorePersonalizzato && (
+                                            <span className="text-[9px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-1.5 py-0.2 rounded">
+                                              {capo.colorePersonalizzato}
+                                            </span>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <span className="text-xs sm:text-sm font-black text-[#002b80] tabular-nums shrink-0">
+                                    €{Number(capo.prezzo || 0).toFixed(2)}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ========================================================
+          MODALE ANTEPRIMA CATALOGO
+         ======================================================== */}
       {mostraAnteprimaCatalogo && (
         <div 
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 backdrop-blur-md p-3 sm:p-6 animate-in fade-in duration-150 overflow-y-auto"
@@ -1571,7 +2077,9 @@ export default function PannelloAdmin({
         </div>
       )}
 
-      {/* MODALE MODIFICA ARTICOLO CATALOGO */}
+      {/* ========================================================
+          MODALE MODIFICA ARTICOLO CATALOGO
+         ======================================================== */}
       {prodottoInModifica && (
         <div 
           className="fixed inset-0 z-55 flex items-center justify-center bg-slate-950/65 backdrop-blur-sm p-3 sm:p-4 animate-in fade-in duration-150 overflow-y-auto"
@@ -1629,108 +2137,64 @@ export default function PannelloAdmin({
                 />
               </div>
 
-              {/* FORMATO E RANGE TAGLIE MODALE */}
-              <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-3">
-                <label className="text-xs font-black uppercase tracking-wider text-slate-700 block">
-                  Formato & Range Taglie
-                </label>
-                
-                <div className="grid grid-cols-3 p-1 bg-slate-200/70 rounded-xl gap-1 select-none">
-                  <button
-                    type="button"
-                    onClick={() => setProdottoInModifica({ 
-                      ...prodottoInModifica, 
-                      tipo_taglie: 'letterale', 
-                      taglia_min: 'XS', 
-                      taglia_max: 'XL',
-                      taglia_unica: false 
-                    })}
-                    className={`py-2 px-1 rounded-lg text-xs font-black transition-all text-center truncate cursor-pointer ${
-                      (prodottoInModifica.tipo_taglie || (prodottoInModifica.taglia_unica ? 'unica' : 'letterale')) === 'letterale'
-                        ? 'bg-white text-[#002b80] shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    4XS — 3XL
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setProdottoInModifica({ 
-                      ...prodottoInModifica, 
-                      tipo_taglie: 'numerica', 
-                      taglia_min: '38', 
-                      taglia_max: '48',
-                      taglia_unica: false 
-                    })}
-                    className={`py-2 px-1 rounded-lg text-xs font-black transition-all text-center truncate cursor-pointer ${
-                      prodottoInModifica.tipo_taglie === 'numerica'
-                        ? 'bg-white text-[#002b80] shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    32 — 56
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setProdottoInModifica({ 
-                      ...prodottoInModifica, 
-                      tipo_taglie: 'unica', 
-                      taglia_unica: true 
-                    })}
-                    className={`py-2 px-1 rounded-lg text-xs font-black transition-all text-center truncate cursor-pointer ${
-                      (prodottoInModifica.tipo_taglie === 'unica' || prodottoInModifica.taglia_unica)
-                        ? 'bg-white text-[#002b80] shadow-2xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    Unica
-                  </button>
+              <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black uppercase tracking-wider text-slate-700 block">
+                    Tipologia Articolo & Taglie
+                  </label>
+                  <span className="text-[10px] font-black uppercase text-[#002b80] bg-blue-50 px-2 py-0.5 rounded">
+                    {(prodottoInModifica.disciplina || settoreUtente).toUpperCase()}
+                  </span>
                 </div>
 
-                {prodottoInModifica.tipo_taglie !== 'unica' && !prodottoInModifica.taglia_unica && (
-                  <div className="pt-2 border-t border-slate-200/80 grid grid-cols-2 gap-2.5">
+                {(() => {
+                  const settoreCapo = prodottoInModifica.disciplina || settoreUtente;
+                  const scaleSettore = getOpzioniScaleSettore(settoreCapo);
+                  const scalaCorrente = prodottoInModifica.scala_taglie_id || scaleSettore[0].id;
+
+                  return (
                     <div>
-                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">Da</label>
                       <select
-                        value={prodottoInModifica.taglia_min || (prodottoInModifica.tipo_taglie === 'numerica' ? '38' : 'XS')}
-                        onChange={e => setProdottoInModifica({ ...prodottoInModifica, taglia_min: e.target.value })}
-                        className="w-full h-9 bg-white border border-slate-200 rounded-lg px-2 text-xs font-black text-slate-800 focus:outline-none focus:border-[#002b80]"
+                        value={scalaCorrente}
+                        onChange={(e) => {
+                          const sceltaId = e.target.value;
+                          const lista = getTaglieByScalaId(sceltaId);
+                          const isUnica = lista.length === 1 && lista[0] === "Taglia Unica";
+                          setProdottoInModifica({
+                            ...prodottoInModifica,
+                            scala_taglie_id: sceltaId,
+                            taglia_unica: isUnica,
+                            taglie_disponibili: lista
+                          });
+                        }}
+                        className="w-full h-11 bg-white border border-slate-200 hover:border-[#002b80] focus:border-[#002b80] rounded-xl px-3 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none transition-colors cursor-pointer"
                       >
-                        {(prodottoInModifica.tipo_taglie === 'numerica' ? SCALA_NUMERICA : SCALA_LETTERALE).map(t => (
-                          <option key={`mod-min-${t}`} value={t}>{t}</option>
+                        {scaleSettore.map(scala => (
+                          <option key={scala.id} value={scala.id}>
+                            {scala.label}
+                          </option>
                         ))}
                       </select>
+
+                      <p className="text-[11px] text-slate-400 font-semibold mt-1.5 px-0.5">
+                        Taglie disponibili: <strong className="text-slate-700">{getTaglieByScalaId(scalaCorrente).join(', ')}</strong>
+                      </p>
                     </div>
-                    <div>
-                      <label className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">A</label>
-                      <select
-                        value={prodottoInModifica.taglia_max || (prodottoInModifica.tipo_taglie === 'numerica' ? '48' : 'XL')}
-                        onChange={e => setProdottoInModifica({ ...prodottoInModifica, taglia_max: e.target.value })}
-                        className="w-full h-9 bg-white border border-slate-200 rounded-lg px-2 text-xs font-black text-slate-800 focus:outline-none focus:border-[#002b80]"
-                      >
-                        {(prodottoInModifica.tipo_taglie === 'numerica' ? SCALA_NUMERICA : SCALA_LETTERALE).map(t => (
-                          <option key={`mod-max-${t}`} value={t}>{t}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
 
-              {/* PERSONALIZZAZIONI MODALE */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">
                   <label className="text-xs font-black uppercase tracking-wider text-slate-700 block">
                     Personalizzazioni Abilitate
                   </label>
                   <span className="text-[11px] font-semibold text-slate-400">
-                    {isNuoto ? "Solo Nuoto" : "Opzioni consentite"}
+                    {(prodottoInModifica.disciplina || settoreUtente) === 'nuoto' ? "Solo Nuoto" : "Opzioni consentite"}
                   </span>
                 </div>
 
-                {isNuoto ? (
+                {(prodottoInModifica.disciplina || settoreUtente) === 'nuoto' ? (
                   <div
                     onClick={() => setProdottoInModifica(prev => ({ ...prev, personalizzabile_nome: !prev.personalizzabile_nome }))}
                     className={`w-full p-3 rounded-2xl border transition-all flex items-center justify-between cursor-pointer select-none active:scale-[0.99] ${
@@ -1824,7 +2288,263 @@ export default function PannelloAdmin({
         </div>
       )}
 
-      {/* MODALE SELEZIONE: PER TIPOLOGIA */}
+      {/* ========================================================
+          MODALE: CREA ORDINE DELEGATO PER ACCOUNT (FULL-VIEWPORT)
+         ======================================================== */}
+      {accountPerOrdine && (
+        <ModalCreaOrdineAdmin
+          isOpen={Boolean(accountPerOrdine)}
+          onClose={() => setAccountPerOrdine(null)}
+          account={accountPerOrdine}
+          prodotti={prodotti}
+          settoreUtente={settoreUtente}
+          onZoomFoto={onZoomFoto}
+          onConfermaOrdine={onCreaOrdinePerUtente}
+        />
+      )}
+
+      {/* ========================================================
+          MODALE: MODIFICA PROFILO ATLETA
+         ======================================================== */}
+      {profiloInModifica && (
+        <div 
+          className="fixed inset-0 z-55 flex items-center justify-center bg-slate-950/65 backdrop-blur-sm p-3.5 sm:p-5 animate-in fade-in duration-150 overflow-y-auto"
+          onClick={() => setProfiloInModifica(null)}
+        >
+          <div 
+            className="relative w-full max-w-sm sm:max-w-md bg-white rounded-3xl p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[90dvh] flex flex-col my-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-3.5 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-blue-50 text-[#002b80] flex items-center justify-center text-sm shadow-2xs">
+                  <FontAwesomeIcon icon={faPenToSquare} />
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-[#002b80] block">Amministrazione</span>
+                  <h3 className="text-sm sm:text-base font-black text-slate-900 leading-tight">Modifica Profilo Atleta</h3>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setProfiloInModifica(null)}
+                className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center text-xs transition-colors cursor-pointer"
+              >
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSalvaModificaProfilo} className="flex-1 overflow-y-auto pr-1 space-y-3.5">
+              <div>
+                <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">Nome</label>
+                <input 
+                  type="text"
+                  required
+                  value={profiloInModifica.nome}
+                  onChange={e => setProfiloInModifica({ ...profiloInModifica, nome: e.target.value })}
+                  className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3.5 text-sm font-bold text-slate-900 focus:outline-none focus:border-[#002b80]"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">Cognome</label>
+                <input 
+                  type="text"
+                  required
+                  value={profiloInModifica.cognome}
+                  onChange={e => setProfiloInModifica({ ...profiloInModifica, cognome: e.target.value })}
+                  className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3.5 text-sm font-bold text-slate-900 focus:outline-none focus:border-[#002b80]"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">Categoria</label>
+                <select
+                  value={profiloInModifica.categoria}
+                  onChange={e => setProfiloInModifica({ ...profiloInModifica, categoria: e.target.value })}
+                  className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none focus:border-[#002b80] cursor-pointer"
+                >
+                  {categorieSettore.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  className="w-full h-12 bg-[#002b80] hover:bg-[#002060] active:scale-[0.99] text-white font-black rounded-2xl text-xs sm:text-sm uppercase tracking-wider transition-all shadow-md flex items-center justify-center cursor-pointer"
+                >
+                  Salva Modifiche Profilo
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          MODALE: AGGIUNGI PROFILO ATLETA
+         ======================================================== */}
+      {profiloInCreazione && (
+        <div 
+          className="fixed inset-0 z-55 flex items-center justify-center bg-slate-950/65 backdrop-blur-sm p-3.5 sm:p-5 animate-in fade-in duration-150 overflow-y-auto"
+          onClick={() => setProfiloInCreazione(null)}
+        >
+          <div 
+            className="relative w-full max-w-sm sm:max-w-md bg-white rounded-3xl p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[90dvh] flex flex-col my-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-3.5 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center text-sm shadow-2xs">
+                  <FontAwesomeIcon icon={faUserPlus} />
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-700 block">Amministrazione</span>
+                  <h3 className="text-sm sm:text-base font-black text-slate-900 leading-tight">Nuovo Profilo Atleta</h3>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setProfiloInCreazione(null)}
+                className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center text-xs transition-colors cursor-pointer"
+              >
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSalvaNuovoProfilo} className="flex-1 overflow-y-auto pr-1 space-y-3.5">
+              <div>
+                <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">Nome</label>
+                <input 
+                  type="text"
+                  required
+                  placeholder="Es. Mario"
+                  value={profiloInCreazione.nome}
+                  onChange={e => setProfiloInCreazione({ ...profiloInCreazione, nome: e.target.value })}
+                  className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3.5 text-sm font-bold text-slate-900 focus:outline-none focus:border-[#002b80]"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">Cognome</label>
+                <input 
+                  type="text"
+                  required
+                  placeholder="Es. Rossi"
+                  value={profiloInCreazione.cognome}
+                  onChange={e => setProfiloInCreazione({ ...profiloInCreazione, cognome: e.target.value })}
+                  className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3.5 text-sm font-bold text-slate-900 focus:outline-none focus:border-[#002b80]"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">Categoria</label>
+                <select
+                  value={profiloInCreazione.categoria}
+                  onChange={e => setProfiloInCreazione({ ...profiloInCreazione, categoria: e.target.value })}
+                  className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none focus:border-[#002b80] cursor-pointer"
+                >
+                  {categorieSettore.map(c => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  className="w-full h-12 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-black rounded-2xl text-xs sm:text-sm uppercase tracking-wider transition-all shadow-md flex items-center justify-center cursor-pointer"
+                >
+                  Aggiungi Profilo
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          MODALE: MODIFICA NOMINATIVO ACCOUNT
+         ======================================================== */}
+      {accountInModifica && (
+        <div 
+          className="fixed inset-0 z-55 flex items-center justify-center bg-slate-950/65 backdrop-blur-sm p-3.5 sm:p-5 animate-in fade-in duration-150 overflow-y-auto"
+          onClick={() => setAccountInModifica(null)}
+        >
+          <div 
+            className="relative w-full max-w-sm sm:max-w-md bg-white rounded-3xl p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[90dvh] flex flex-col my-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-3.5 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center text-sm shadow-2xs">
+                  <FontAwesomeIcon icon={faPenToSquare} />
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-700 block">Amministrazione</span>
+                  <h3 className="text-sm sm:text-base font-black text-slate-900 leading-tight">Modifica Dati Account</h3>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setAccountInModifica(null)}
+                className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center text-xs transition-colors cursor-pointer"
+              >
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSalvaModificaAccount} className="flex-1 overflow-y-auto pr-1 space-y-3.5">
+              <div>
+                <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">Email</label>
+                <input 
+                  type="text"
+                  disabled
+                  value={accountInModifica.email}
+                  className="w-full h-11 bg-slate-100 border border-slate-200 rounded-xl px-3.5 text-sm font-bold text-slate-500 cursor-not-allowed"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">Nome</label>
+                <input 
+                  type="text"
+                  required
+                  value={accountInModifica.nome}
+                  onChange={e => setAccountInModifica({ ...accountInModifica, nome: e.target.value })}
+                  className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3.5 text-sm font-bold text-slate-900 focus:outline-none focus:border-[#002b80]"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">Cognome</label>
+                <input 
+                  type="text"
+                  required
+                  value={accountInModifica.cognome}
+                  onChange={e => setAccountInModifica({ ...accountInModifica, cognome: e.target.value })}
+                  className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3.5 text-sm font-bold text-slate-900 focus:outline-none focus:border-[#002b80]"
+                />
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white font-black rounded-2xl text-xs sm:text-sm uppercase tracking-wider transition-all shadow-md flex items-center justify-center cursor-pointer"
+                >
+                  Salva Modifiche Account
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          MODALE SELEZIONE PER TIPOLOGIA (Lavorazione / Pronti Ritiro)
+         ======================================================== */}
       {modalSelezione && (
         <div 
           className="fixed inset-0 z-55 flex items-center justify-center bg-slate-950/65 backdrop-blur-sm p-3.5 sm:p-5 animate-in fade-in duration-150 overflow-y-auto"

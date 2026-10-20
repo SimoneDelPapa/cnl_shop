@@ -66,10 +66,12 @@ export default function NegozioUtente({
   const procediAPaypal = () => {
     setMostraModalPaypal(false);
     
-    // VERIFICA SE C'È UN IMPORTO DA SALDARE MAGGIORE DI ZERO E CONCATENA L'IMPORTO AL LINK
-    const urlDinamico = totaleDaSaldare > 0 
-      ? `${linkPaypal}/${totaleDaSaldare.toFixed(2)}` 
-      : linkPaypal;
+    // URL PAYPAL SENZA DECIMALI, SENZA VALUTA E SENZA WWW
+    const baseUrlPulito = (linkPaypal || '').replace("www.", "");
+    const importoIntero = Math.round(Number(totaleDaSaldare || 0));
+    const urlDinamico = importoIntero > 0 
+      ? `${baseUrlPulito}/${importoIntero}` 
+      : baseUrlPulito;
 
     const a = document.createElement('a');
     a.href = urlDinamico;

@@ -3,7 +3,17 @@ import Auth from './Auth';
 import Navbar from './components/Navbar';
 import NegozioUtente from './components/NegozioUtente';
 import PannelloAdmin from './components/PannelloAdmin';
-import { SCALA_NUMERICA, SCALA_LETTERALE, generaRangeTaglie } from './utils/taglie';
+import { 
+  getOpzioniScaleSettore, 
+  getTaglieByScalaId,
+  TAGLIA_UNICA,
+  TAGLIE_SHORTS_UNISEX,
+  TAGLIE_TSHIRT_UNISEX_COMPLETO,
+  TAGLIE_PN_COSTUME_DONNA_COMPLETO,
+  TAGLIE_NUOTO_COSTUME_DONNA_COMPLETO,
+  TAGLIE_PN_COSTUME_UOMO,
+  TAGLIE_NUOTO_COSTUME_UOMO
+} from './utils/taglie';
 import LightboxModal from './components/LightboxModal';
 import ModalModificaOrdine from './components/ModalModificaOrdine';
 import ModalProfilo from './components/ModalProfilo';
@@ -13,6 +23,7 @@ import CustomModal from './components/CustomModal';
 import BannerNotifiche from './components/BannerNotifiche';
 import ToastNotification from './components/ToastNotification';
 import XLSX from 'xlsx-js-style';
+import ModalSbloccoUtenti from './components/ModalSbloccoUtenti';
 
 import { auth, db } from './firebase';
 import { onAuthStateChanged, signOut, deleteUser } from 'firebase/auth';
@@ -33,10 +44,19 @@ import {
   writeBatch
 } from 'firebase/firestore';
 
-// NUOVI LINK PAYPAL AGGIORNATI E SALVATI
+// NUOVI LINK PAYPAL AGGIORNATI E SALVATI (senza www)
 const PAYPAL_LINKS = {
   pallanuoto: "https://paypal.me/PallanuotoLucca",
-  nuoto: "https://www.paypal.me/CircoloNuotoLucca"
+  nuoto: "https://paypal.me/CircoloNuotoLucca"
+};
+
+// Genera l'URL PayPal.me solo con importo intero, senza decimali e senza valuta
+const formattaPaypalLink = (baseUrl, importo) => {
+  const pulitoUrl = (baseUrl || '').replace("www.", "");
+  const num = Math.round(Number(importo || 0));
+  if (num <= 0) return pulitoUrl;
+
+  return `${pulitoUrl}/${num}`;
 };
 
 const CATEGORIE_PALLANUOTO = [
@@ -53,6 +73,7 @@ export default function App() {
   const [prodotti, setProdotti] = useState([]);
   const [ordiniUtente, setOrdiniUtente] = useState([]);
   const [tuttiGliOrdiniAdmin, setTuttiGliOrdiniAdmin] = useState([]);
+  const [tuttiGliUtenti, setTuttiGliUtenti] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isCheckout, setIsCheckout] = useState(false);
   const [zoomImage, setZoomImage] = useState(null);
@@ -62,6 +83,12 @@ export default function App() {
   const [mostraModalProfilo, setMostraModalProfilo] = useState(false);
   const [mostraModalCarrello, setMostraModalCarrello] = useState(false);
   const [mostraGuidaPrimoAccesso, setMostraGuidaPrimoAccesso] = useState(false);
+
+  // GESTIONE SBLOCCO PASSWORD SEZIONE UTENTE
+  const [sezioneUtentiSbloccata, setSezioneUtentiSbloccata] = useState(() => {
+    return sessionStorage.getItem("cnl_sezione_utenti_sbloccata") === "true";
+  });
+  const [mostraModalSbloccoUtenti, setMostraModalSbloccoUtenti] = useState(false);
 
   const [settoreScelto, setSettoreScelto] = useState(() => {
     return sessionStorage.getItem("cnl_settore_richiesto") || 'pallanuoto';
@@ -93,18 +120,38 @@ export default function App() {
     });
   }, []);
 
-  const [adminTab, setAdminTab] = useState('ordini');
+  const [adminTab, setAdminTab] = useState(() => {
+    return sessionStorage.getItem("cnl_admin_tab") || 'ordini';
+  });
   const [filtroStatoAdmin, setFiltroStatoAdmin] = useState('Tutti');
   const [ricercaAdmin, setRicercaAdmin] = useState('');
+
+  // NAVIGAZIONE TAB PROTETTA DA PASSWORD PER 'UTENTI'
+  const handleCambiaAdminTab = useCallback((nuovaTab) => {
+    if (nuovaTab === 'utenti' && !sezioneUtentiSbloccata) {
+      setMostraModalSbloccoUtenti(true);
+      return;
+    }
+    setAdminTab(nuovaTab);
+    sessionStorage.setItem("cnl_admin_tab", nuovaTab);
+  }, [sezioneUtentiSbloccata]);
+
+  const handleConfermaSbloccoUtenti = useCallback(() => {
+    setSezioneUtentiSbloccata(true);
+    sessionStorage.setItem("cnl_sezione_utenti_sbloccata", "true");
+    setMostraModalSbloccoUtenti(false);
+    setAdminTab('utenti');
+    sessionStorage.setItem("cnl_admin_tab", 'utenti');
+    mostraMessaggio("Accesso Consentito", "Sezione Utente sbloccata per questa sessione.", "success");
+  }, [mostraMessaggio]);
 
   const [nuovoProd, setNuovoProd] = useState({ 
     nome: '', 
     prezzo: '', 
     immagine_url: '', 
-    taglia_unica: false,
-    tipo_taglie: 'letterale',
-    taglia_min: 'XS',
-    taglia_max: 'XL',
+    scala_taglie_id: 'pn_calotta_maschile',
+    taglia_unica: true,
+    taglie_disponibili: ["Taglia Unica"],
     personalizzabile_nome: false, 
     personalizzabile_numero: false, 
     personalizzabile_colore: false
@@ -159,7 +206,7 @@ export default function App() {
       : (Array.isArray(utenteLoggato.atleti) ? utenteLoggato.atleti : []);
   }, [utenteLoggato, settoreAttivo]);
 
-  // CONTROLLO ATTIVAZIONE GUIDA PRIMO ACCESSO (Asincrono per evitare render a cascata)
+  // CONTROLLO ATTIVAZIONE GUIDA PRIMO ACCESSO
   useEffect(() => {
     if (!loading && utenteLoggato && !isUserAdminNelSettore) {
       const userId = utenteLoggato.id || utenteLoggato.auth_uid;
@@ -182,14 +229,15 @@ export default function App() {
     setMostraGuidaPrimoAccesso(false);
   }, [utenteLoggato]);
 
-  // SCROLL-LOCK SENZA POSIZIONAMENTO FISSO DEL BODY (NON ROMPE LA NAVBAR)
+  // SCROLL-LOCK SENZA POSIZIONAMENTO FISSO DEL BODY
   const isQualcheModalAperto = Boolean(
     mostraModalCarrello || 
     mostraGuidaPrimoAccesso || 
     mostraModalProfilo || 
     zoomImage || 
     ordineInModifica || 
-    modalConfig.isOpen
+    modalConfig.isOpen ||
+    mostraModalSbloccoUtenti
   );
 
   useEffect(() => {
@@ -210,7 +258,6 @@ export default function App() {
   useEffect(() => {
     let unsubscribeDoc = null;
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-      // Se l'utente non ha verificato la mail, non impostare l'utente loggato
       if (user && user.emailVerified) {
         const userDocRef = doc(db, "utenti", user.uid);
         unsubscribeDoc = onSnapshot(userDocRef, (userSnap) => {
@@ -235,6 +282,7 @@ export default function App() {
         setUtenteLoggato(null);
         setOrdiniUtente([]);
         setTuttiGliOrdiniAdmin([]);
+        setTuttiGliUtenti([]);
         setNotificheUtente([]);
         setLoading(false);
       }
@@ -254,6 +302,9 @@ export default function App() {
       setSettoreScelto('pallanuoto');
       sessionStorage.removeItem("cnl_settore_richiesto");
       sessionStorage.removeItem("cnl_admin_tab");
+      sessionStorage.removeItem("cnl_sezione_utenti_sbloccata");
+      setSezioneUtentiSbloccata(false);
+      setMostraModalSbloccoUtenti(false);
       setMostraModalCarrello(false);
       setMostraModalProfilo(false);
       setOrdineInModifica(null);
@@ -412,6 +463,27 @@ export default function App() {
 
     return () => unsubscribe();
   }, [utenteLoggato, isUserAdminNelSettore, settoreAttivo]);
+
+  // Ascolto in tempo reale di TUTTI gli account su Firestore senza esclusioni da orderBy
+  useEffect(() => {
+    if (!utenteLoggato || !isUserAdminNelSettore) return;
+
+    const qUtenti = collection(db, "utenti");
+    const unsubscribe = onSnapshot(qUtenti, (snapshot) => {
+      const users = snapshot.docs
+        .filter(d => d.id !== "config_sicurezza_admin") // <--- Esclude il documento di sicurezza
+        .map(d => ({ id: d.id, ...d.data() }));
+
+      users.sort((a, b) => {
+        const nomeA = `${a.nome || ''} ${a.cognome || ''}`.trim() || a.email || '';
+        const nomeB = `${b.nome || ''} ${b.cognome || ''}`.trim() || b.email || '';
+        return nomeA.localeCompare(nomeB, 'it', { sensitivity: 'base' });
+      });
+      setTuttiGliUtenti(users);
+    }, (err) => console.error("Errore fetch utenti:", err));
+
+    return () => unsubscribe();
+  }, [utenteLoggato, isUserAdminNelSettore]);
 
   useEffect(() => {
     if (!utenteLoggato) return;
@@ -662,10 +734,10 @@ export default function App() {
         imageUrl = await caricaImmagineSuCloudinary(fileImmagine);
       }
 
-      const tipo = nuovoProd.tipo_taglie || (nuovoProd.taglia_unica ? 'unica' : 'letterale');
-      const minVal = nuovoProd.taglia_min || (tipo === 'numerica' ? '38' : 'XS');
-      const maxVal = nuovoProd.taglia_max || (tipo === 'numerica' ? '48' : 'XL');
-      const taglieDisponibili = generaRangeTaglie(tipo, minVal, maxVal);
+      const scaleSettore = getOpzioniScaleSettore(settoreAttivo);
+      const scalaId = nuovoProd.scala_taglie_id || scaleSettore[0].id;
+      const taglieFinali = getTaglieByScalaId(scalaId);
+      const isUnica = taglieFinali.length === 1 && taglieFinali[0] === "Taglia Unica";
 
       const batchRef = collection(db, "prodotti");
       await setDoc(doc(batchRef), {
@@ -674,24 +746,22 @@ export default function App() {
         disciplina: settoreAttivo,
         immagine_url: imageUrl,
         attivo: true,
-        taglia_unica: Boolean(tipo === 'unica'),
-        tipo_taglie: tipo,
-        taglia_min: tipo === 'unica' ? null : minVal,
-        taglia_max: tipo === 'unica' ? null : maxVal,
-        taglie_disponibili: taglieDisponibili,
+        scala_taglie_id: scalaId,
+        taglia_unica: isUnica,
+        taglie_disponibili: taglieFinali,
         personalizzabile_nome: Boolean(nuovoProd.personalizzabile_nome),
         personalizzabile_numero: settoreAttivo === 'nuoto' ? false : Boolean(nuovoProd.personalizzabile_numero),
         personalizzabile_colore: settoreAttivo === 'nuoto' ? false : Boolean(nuovoProd.personalizzabile_colore),
         creato_il: serverTimestamp()
       });
+
       setNuovoProd({ 
         nome: '', 
         prezzo: '', 
         immagine_url: '', 
-        taglia_unica: false,
-        tipo_taglie: 'letterale',
-        taglia_min: 'XS',
-        taglia_max: 'XL',
+        scala_taglie_id: scaleSettore[0].id,
+        taglia_unica: scaleSettore[0].taglie.length === 1 && scaleSettore[0].taglie[0] === "Taglia Unica",
+        taglie_disponibili: scaleSettore[0].taglie,
         personalizzabile_nome: false, 
         personalizzabile_numero: false, 
         personalizzabile_colore: false
@@ -835,10 +905,8 @@ export default function App() {
     if (!utenteLoggato || carrello.length === 0) return;
     const campoCarrello = settoreAttivo === 'nuoto' ? "carrello_nuoto" : "carrello_pallanuoto";
     
-    // VERIFICA SE L'IMPORTO È MAGGIORE DI ZERO E GENERA IL LINK CON L'IMPORTO ANNESSO
-    const linkPaypalConImporto = totaleCarrello > 0 
-      ? `${linkPaypalSettore}/${totaleCarrello.toFixed(2)}` 
-      : linkPaypalSettore;
+    // Genera il link formattato correttamente con valuta EUR senza decimali superflui
+    const linkPaypalConImporto = formattaPaypalLink(linkPaypalSettore, totaleCarrello);
 
     chiediConferma(
       "Conferma Ordine",
@@ -894,7 +962,7 @@ export default function App() {
     );
   }, [carrello, totaleCarrello, utenteLoggato, settoreAttivo, linkPaypalSettore, chiediConferma, mostraMessaggio]);
 
-  // EXCEL EXPORT (Personalizzazioni raggruppate per Articolo, senza Acquirente)
+  // EXCEL EXPORT BASATO SU SCALE DI TAGLIE.JS
   const generaFileXlsx = useCallback((ordiniDaElaborare) => {
     const tuttiArticoli = [];
     ordiniDaElaborare.forEach(ord => {
@@ -919,37 +987,98 @@ export default function App() {
     const nomeSettoreTitolo = isNuoto ? 'NUOTO' : 'PALLANUOTO';
     const wb = XLSX.utils.book_new();
 
-    // STILI EXCEL CONDIVISI
+    // ========================================================
+    // GERARCHIA ORDINAMENTO BASATA SU TAGLIE.JS
+    // ========================================================
+    // Ricava l'elenco sequenziale di tutte le taglie previste nei cataloghi:
+    // 1. Taglia Unica
+    // 2. Junior (T-Shirt & Costumi)
+    // 3. Tessili Shorts / Adulti (4XS -> 3XL)
+    // 4. Numeriche Costumi (34 -> 56)
+    const sequenzaCanonicaTaglie = Array.from(new Set([
+      ...TAGLIA_UNICA,
+      ...TAGLIE_TSHIRT_UNISEX_COMPLETO.filter(t => t.toLowerCase().includes('junior')),
+      ...TAGLIE_PN_COSTUME_DONNA_COMPLETO.filter(t => t.toLowerCase().includes('junior')),
+      ...TAGLIE_NUOTO_COSTUME_DONNA_COMPLETO.filter(t => t.toLowerCase().includes('junior')),
+      ...TAGLIE_SHORTS_UNISEX,
+      ...TAGLIE_NUOTO_COSTUME_UOMO,
+      ...TAGLIE_PN_COSTUME_UOMO,
+      ...TAGLIE_TSHIRT_UNISEX_COMPLETO,
+      ...TAGLIE_PN_COSTUME_DONNA_COMPLETO,
+      ...TAGLIE_NUOTO_COSTUME_DONNA_COMPLETO
+    ]));
+
+    const confrontaTaglie = (tagliaA, tagliaB) => {
+      const a = (tagliaA || "Taglia Unica").trim();
+      const b = (tagliaB || "Taglia Unica").trim();
+
+      if (a === b) return 0;
+
+      const idxA = sequenzaCanonicaTaglie.findIndex(t => t.toLowerCase() === a.toLowerCase());
+      const idxB = sequenzaCanonicaTaglie.findIndex(t => t.toLowerCase() === b.toLowerCase());
+
+      if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+      if (idxA !== -1) return -1;
+      if (idxB !== -1) return 1;
+
+      return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+    };
+
+    // DEFINIZIONE BORDI NERI COMPLETI
+    const blackBorders = {
+      top: { style: "thin", color: { rgb: "000000" } },
+      bottom: { style: "thin", color: { rgb: "000000" } },
+      left: { style: "thin", color: { rgb: "000000" } },
+      right: { style: "thin", color: { rgb: "000000" } }
+    };
+
+    // STILI GRAFICI PROFESSIONALI CON BORDI NERI
     const styleBanner = {
       font: { name: "Calibri", sz: 12, bold: true, color: { rgb: "FFFFFF" } },
-      fill: { fgColor: { rgb: "002B80" } },
-      alignment: { horizontal: "center", vertical: "center" }
+      fill: { fgColor: { rgb: "001F54" } },
+      alignment: { horizontal: "center", vertical: "center" },
+      border: blackBorders
     };
+
     const styleSezioneTitle = {
       font: { name: "Calibri", sz: 11, bold: true, color: { rgb: "FFFFFF" } },
       fill: { fgColor: { rgb: "1E3A8A" } },
-      alignment: { horizontal: "left", vertical: "center" }
+      alignment: { horizontal: "left", vertical: "center" },
+      border: blackBorders
     };
+
     const styleHeaderCol = {
-      font: { name: "Calibri", sz: 10, bold: true, color: { rgb: "1E293B" } },
+      font: { name: "Calibri", sz: 10, bold: true, color: { rgb: "0F172A" } },
       fill: { fgColor: { rgb: "E2E8F0" } },
-      alignment: { horizontal: "center", vertical: "center" }
+      alignment: { horizontal: "center", vertical: "center" },
+      border: blackBorders
     };
+
     const styleHeaderTotal = {
-      font: { name: "Calibri", sz: 10, bold: true, color: { rgb: "002B80" } },
-      fill: { fgColor: { rgb: "DBEAFE" } },
-      alignment: { horizontal: "center", vertical: "center" }
+      font: { name: "Calibri", sz: 10, bold: true, color: { rgb: "001F54" } },
+      fill: { fgColor: { rgb: "BFDBFE" } },
+      alignment: { horizontal: "center", vertical: "center" },
+      border: blackBorders
     };
+
     const styleCella = (alt, align = "center", bold = false, isDimmed = false) => ({
       font: { 
         name: "Calibri", 
         sz: 10, 
         bold: bold, 
-        color: { rgb: isDimmed ? "94A3B8" : (bold ? "0F172A" : "334155") } 
+        color: { rgb: isDimmed ? "64748B" : (bold ? "0F172A" : "1E293B") } 
       },
       fill: { fgColor: { rgb: alt ? "F8FAFC" : "FFFFFF" } },
-      alignment: { horizontal: align, vertical: "center" }
+      alignment: { horizontal: align, vertical: "center" },
+      border: blackBorders
     });
+
+    const styleCellaZero = {
+      font: { name: "Calibri", sz: 10, color: { rgb: "94A3B8" } },
+      fill: { fgColor: { rgb: "F1F5F9" } },
+      alignment: { horizontal: "center", vertical: "center" },
+      border: blackBorders
+    };
 
     // ========================================================
     // FOGLIO 1: RIEPILOGO TAGLIE
@@ -957,29 +1086,10 @@ export default function App() {
     const nomiProdottiUnivoci = Array.from(new Set(tuttiArticoli.map(a => a.nomeProdotto || "Capo")));
     const numCols1 = nomiProdottiUnivoci.length + 2;
 
-    const tagliePresentiSet = new Set(tuttiArticoli.map(a => (a.taglia || "Taglia Unica").trim().toUpperCase()));
-    const elencoTaglieOrdinate = [];
-
-    if (tagliePresentiSet.has("TAGLIA UNICA")) {
-      elencoTaglieOrdinate.push("Taglia Unica");
-      tagliePresentiSet.delete("TAGLIA UNICA");
-    }
-
-    SCALA_LETTERALE.forEach(t => {
-      if (tagliePresentiSet.has(t.toUpperCase())) {
-        elencoTaglieOrdinate.push(t);
-        tagliePresentiSet.delete(t.toUpperCase());
-      }
-    });
-
-    SCALA_NUMERICA.forEach(t => {
-      if (tagliePresentiSet.has(t)) {
-        elencoTaglieOrdinate.push(t);
-        tagliePresentiSet.delete(t);
-      }
-    });
-
-    Array.from(tagliePresentiSet).forEach(t => elencoTaglieOrdinate.push(t));
+    const tagliePresentiSet = new Set(tuttiArticoli.map(a => (a.taglia || "Taglia Unica").trim()));
+    
+    // Ordinamento taglie derivato direttamente dalla sequenza di taglie.js
+    const elencoTaglieOrdinate = Array.from(tagliePresentiSet).sort(confrontaTaglie);
 
     const dataWs1 = [
       [{ v: `CIRCOLO NUOTO LUCCA - ${nomeSettoreTitolo}`, s: styleBanner }, ...Array(numCols1 - 1).fill({ v: "", s: styleBanner })],
@@ -997,12 +1107,17 @@ export default function App() {
 
       nomiProdottiUnivoci.forEach(nomeProd => {
         const conteggio = tuttiArticoli.filter(a => {
-          const tagliaArt = (a.taglia || "Taglia Unica").trim().toUpperCase();
-          return a.nomeProdotto === nomeProd && tagliaArt === taglia.toUpperCase();
+          const tagliaArt = (a.taglia || "Taglia Unica").trim().toLowerCase();
+          return a.nomeProdotto === nomeProd && tagliaArt === taglia.toLowerCase();
         }).length;
         totaliPerProdotto[nomeProd] += conteggio;
         sommaRiga += conteggio;
-        riga.push({ v: conteggio, t: "n", s: styleCella(alt, "center", false) });
+
+        if (conteggio === 0) {
+          riga.push({ v: "-", t: "s", s: styleCellaZero });
+        } else {
+          riga.push({ v: conteggio, t: "n", s: styleCella(alt, "center", false) });
+        }
       });
 
       totaleGenerale += sommaRiga;
@@ -1022,17 +1137,15 @@ export default function App() {
     XLSX.utils.book_append_sheet(wb, ws1, "Riepilogo Taglie");
 
     // ========================================================
-    // FOGLIO 2: PERSONALIZZAZIONI RAGGRUPPATE PER ARTICOLO (SENZA ACQUIRENTE)
+    // FOGLIO 2: PERSONALIZZAZIONI RAGGRUPPATE PER ARTICOLO (SENZA RIGHE VUOTE)
     // ========================================================
     const NUM_COLS_2 = 5;
     const dataWs2 = [
-      [{ v: `CIRCOLO NUOTO LUCCA - ${nomeSettoreTitolo}`, s: styleBanner }, ...Array(NUM_COLS_2 - 1).fill({ v: "", s: styleBanner })],
-      []
+      [{ v: `CIRCOLO NUOTO LUCCA - ${nomeSettoreTitolo}`, s: styleBanner }, ...Array(NUM_COLS_2 - 1).fill({ v: "", s: styleBanner })]
     ];
-    let rigaCorrente = 2;
+    let rigaCorrente = 1;
     const mergesWs2 = [{ s: { r: 0, c: 0 }, e: { r: 0, c: NUM_COLS_2 - 1 } }];
 
-    // Raggruppa i capi personalizzati per Tipo Articolo
     const gruppiPersonalizzatiPerArticolo = new Map();
 
     tuttiArticoli.forEach(art => {
@@ -1059,12 +1172,13 @@ export default function App() {
       let sezioneIndex = 1;
 
       gruppiPersonalizzatiPerArticolo.forEach((listaCapi, nomeArticolo) => {
-        // Verifica quali campi sono effettivamente usati da QUESTO tipo di articolo
+        // Capi ordinati per taglia crescente in accordo con la sequenza di taglie.js
+        listaCapi.sort((a, b) => confrontaTaglie(a.taglia, b.taglia));
+
         const articoloUsaNome = listaCapi.some(a => a.nomePersonalizzato && String(a.nomePersonalizzato).trim() !== "");
         const articoloUsaNumero = listaCapi.some(a => a.numeroPersonalizzato && String(a.numeroPersonalizzato).trim() !== "");
         const articoloUsaColore = listaCapi.some(a => a.colorePersonalizzato && String(a.colorePersonalizzato).trim() !== "");
 
-        // Titolo Sezione per Tipologia Articolo
         dataWs2.push([
           { v: `${sezioneIndex}. ${nomeArticolo.toUpperCase()} (${listaCapi.length} CAPI)`, s: styleSezioneTitle },
           ...Array(NUM_COLS_2 - 1).fill({ v: "", s: styleSezioneTitle })
@@ -1072,7 +1186,6 @@ export default function App() {
         mergesWs2.push({ s: { r: rigaCorrente, c: 0 }, e: { r: rigaCorrente, c: NUM_COLS_2 - 1 } });
         rigaCorrente++;
 
-        // Intestazione Colonne uniforme
         dataWs2.push([
           { v: "Taglia", s: styleHeaderCol },
           { v: "Nome Profilo", s: styleHeaderCol },
@@ -1082,7 +1195,6 @@ export default function App() {
         ]);
         rigaCorrente++;
 
-        // Righe Capi
         listaCapi.forEach((art, idx) => {
           const alt = idx % 2 !== 0;
 
@@ -1099,7 +1211,7 @@ export default function App() {
             : "-";
 
           dataWs2.push([
-            { v: art.taglia || "Unica", s: styleCella(alt, "center", true) },
+            { v: art.taglia || "Taglia Unica", s: styleCella(alt, "center", true) },
             { v: art.atleta || "-", s: styleCella(alt, "left") },
             { v: valoreNome, s: styleCella(alt, "center", articoloUsaNome && valoreNome !== "-", !articoloUsaNome) },
             { v: valoreNumero, s: styleCella(alt, "center", articoloUsaNumero && valoreNumero !== "-", !articoloUsaNumero) },
@@ -1108,9 +1220,6 @@ export default function App() {
           rigaCorrente++;
         });
 
-        // Riga vuota di separazione tra le tabelle degli articoli
-        dataWs2.push([]);
-        rigaCorrente++;
         sezioneIndex++;
       });
     }
@@ -1118,11 +1227,11 @@ export default function App() {
     const ws2 = XLSX.utils.aoa_to_sheet(dataWs2);
     ws2['!merges'] = mergesWs2;
     ws2['!cols'] = [
-      { wch: 14 }, // Taglia
-      { wch: 26 }, // Nome Atleta
-      { wch: 32 }, // Nome / Testo da Applicare
-      { wch: 16 }, // N° Calotta
-      { wch: 20 }  // Colore Calotta
+      { wch: 14 },
+      { wch: 26 },
+      { wch: 32 },
+      { wch: 16 },
+      { wch: 20 }
     ];
     XLSX.utils.book_append_sheet(wb, ws2, "Personalizzazioni");
 
@@ -1138,7 +1247,6 @@ export default function App() {
 
     setInvioProduzioneInCorso(true);
     try {
-      // 1. Aggiornamento ordini su Firestore
       const batch = writeBatch(db);
       daAggiornare.forEach(ord => {
         batch.update(doc(db, "ordini", ord.id), { 
@@ -1149,14 +1257,12 @@ export default function App() {
       });
       await batch.commit();
 
-      // 2. Generazione e download del file Excel
       const wb = generaFileXlsx(daAggiornare);
       const nomeFile = `ORDINE_${settoreAttivo.toUpperCase()}_LUCCA.xlsx`;
       XLSX.writeFile(wb, nomeFile);
 
-      // 3. Preparazione e apertura email precompilata per il fornitore
-      const emailFornitore = "marcoardito.okeo@gmail.com"; // Inserisci qui l'indirizzo del fornitore se diverso
-      const emailFornitore2 = "lencioni.stefano@libero.it"; // Inserisci qui l'indirizzo del fornitore se diverso
+      const emailFornitore = "marcoardito.okeo@gmail.com";
+      const emailFornitore2 = "lencioni.stefano@libero.it";
 
       const oggettoEmail = encodeURIComponent(`Ordine Materiale ${settoreAttivo.toUpperCase()} - Circolo Nuoto Lucca`);
       
@@ -1175,7 +1281,6 @@ Cordiali saluti,
 ASD Circolo Nuoto Lucca`
       );
 
-      // Timeout minimo per consentire al browser di avviare il download dell'Excel prima di aprire la mail
       setTimeout(() => {
         window.location.href = `mailto:${emailFornitore},${emailFornitore2}?subject=${oggettoEmail}&body=${corpoEmail}`;
       }, 400);
@@ -1221,7 +1326,7 @@ ASD Circolo Nuoto Lucca`
     try {
       if (tuttiGliOrdiniAdmin.length === 0) return;
       const wb = generaFileXlsx(tuttiGliOrdiniAdmin);
-      XLSX.writeFile(wb, `ORDINI_${settoreAttivo.toUpperCase()}_LUCCA.xlsx`);
+      XLSX.writeFile(wb, `ORDINE_${settoreAttivo.toUpperCase()}_LUCCA.xlsx`);
       mostraMessaggio("Esportato", "File scaricato con successo.", "success");
     } catch (err) {
       mostraMessaggio("Errore: " + err.message, "error");
@@ -1311,10 +1416,7 @@ ASD Circolo Nuoto Lucca`
     return notificheSettoreCorrente.some(n => n.tipo === 'sollecito' || Boolean(n.linkPaypal));
   }, [notificheSettoreCorrente]);
 
-  // ========================================================
   // LOGICA SOLLECITO CENTRALIZZATA & SINCRONIZZATA
-  // ========================================================
-
   const calcolaDebitoTotaleUtente = useCallback(async (emailUtente, utenteId, settore) => {
     let tot = 0;
     const targetEmail = (emailUtente || '').toLowerCase().trim();
@@ -1334,11 +1436,9 @@ ASD Circolo Nuoto Lucca`
         const matchUid = utenteId && o.utente_id === utenteId;
 
         if (matchEmail || matchUid) {
-          // Se l'ordine non è globalmente pagato, controlliamo i singoli capi o il totale dell'ordine
           if (!o.pagato) {
             const lista = Array.isArray(o.articoli) && o.articoli.length > 0 ? o.articoli : [o];
             lista.forEach(capo => {
-              // Sommiamo solo i capi che non risultano singoli o globalmente non saldati
               tot += Number(capo.prezzo || o.prezzo || o.totale || 0);
             });
           }
@@ -1374,7 +1474,6 @@ ASD Circolo Nuoto Lucca`
     const notifRef = doc(db, "utenti", uid, "notifiche", `sollecito_${settore.toLowerCase()}`);
     const debito = await calcolaDebitoTotaleUtente(emailTarget, uid, settore);
 
-    // Se il debito è azzerato, rimuoviamo la notifica
     if (debito <= 0) {
       await deleteDoc(notifRef).catch(() => {});
       return;
@@ -1382,13 +1481,11 @@ ASD Circolo Nuoto Lucca`
 
     const snapNotif = await getDoc(notifRef);
 
-    // Se la notifica non esiste e l'admin NON ha cliccato esplicitamente su "Sollecita" (creaSeNonEsiste = false),
-    // non creiamo il sollecito in-app dal nulla (evitando che appaia da solo spuntando "Saldato").
     if (!snapNotif.exists() && !creaSeNonEsiste) {
       return;
     }
 
-    const linkPaypal = `${PAYPAL_LINKS[settore] || PAYPAL_LINKS.pallanuoto}/${debito.toFixed(2)}`;
+    const linkPaypal = formattaPaypalLink(PAYPAL_LINKS[settore] || PAYPAL_LINKS.pallanuoto, debito);
 
     await setDoc(notifRef, {
       tipo: 'sollecito',
@@ -1421,10 +1518,7 @@ ASD Circolo Nuoto Lucca`
       });
 
       const importoStr = `€${Number(gruppoCliente.totaleDovuto).toFixed(2)}`;
-      
-      const linkPaypal = gruppoCliente.totaleDovuto > 0 
-        ? `${linkPaypalSettore}/${Number(gruppoCliente.totaleDovuto).toFixed(2)}` 
-        : linkPaypalSettore;
+      const linkPaypal = formattaPaypalLink(linkPaypalSettore, gruppoCliente.totaleDovuto);
 
       const oggetto = encodeURIComponent(`Sollecito Saldo Forniture ${settoreAttivo.toUpperCase()} - Circolo Nuoto Lucca`);
       const corpo = encodeURIComponent(
@@ -1439,7 +1533,7 @@ Totale complessivo da saldare: ${importoStr}
 Puoi effettuare il pagamento direttamente al seguente link PayPal ufficiale:
 ${linkPaypal}
 
-Ti chiediamo cortesemente di indicare nella causale il nome dell'atleta o dei profili a cui sono intestati i capi.
+Ti chiediamo cortesemente di selezionare l'opzione FAMILIARI E AMICI e di indicare nella causale il nome dell'atleta o dei profili a cui sono intestati i capi.
 
 Cordiali saluti,
 Circolo Nuoto Lucca`
@@ -1605,6 +1699,303 @@ Circolo Nuoto Lucca`
     );
   }, [chiediConferma, mostraMessaggio]);
 
+  // CREAZIONE ORDINE DA PARTE DELL'ADMIN PER CONTO DI UN UTENTE
+  const handleCreaOrdineAdminPerUtente = useCallback(async (datiOrdine) => {
+    try {
+      const {
+        utenteId,
+        emailAcquirente,
+        nomeAcquirente,
+        atleta,
+        categoria,
+        prodotto,
+        taglia,
+        nomePersonalizzato,
+        numeroPersonalizzato,
+        colorePersonalizzato,
+        pagatoSubito
+      } = datiOrdine;
+
+      const nuovoCapo = {
+        idUnivoco: `${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        prodottoId: prodotto.id,
+        nomeProdotto: prodotto.nome,
+        prezzo: Number(prodotto.prezzo || 0),
+        taglia: prodotto.taglia_unica ? "Taglia Unica" : taglia,
+        taglia_unica: Boolean(prodotto.taglia_unica),
+        atleta: (atleta || "Profilo Generale").trim(),
+        categoria: categoria || "Extra",
+        immagine_url: prodotto.immagine_url || null,
+        nomePersonalizzato: nomePersonalizzato ? nomePersonalizzato.trim().toUpperCase() : null,
+        numeroPersonalizzato: numeroPersonalizzato || null,
+        colorePersonalizzato: colorePersonalizzato || null
+      };
+
+      const ordiniColRef = collection(db, "ordini");
+      const newDocRef = doc(ordiniColRef);
+
+      await setDoc(newDocRef, {
+        ...nuovoCapo,
+        totale: nuovoCapo.prezzo,
+        disciplina: settoreAttivo,
+        stato_pagamento: "In attesa",
+        pagato: Boolean(pagatoSubito),
+        completato: false,
+        utente_id: utenteId,
+        acquirente: nomeAcquirente,
+        email_acquirente: (emailAcquirente || "").toLowerCase().trim(),
+        articoli: [nuovoCapo],
+        creato_da_admin: true,
+        creato_il: serverTimestamp()
+      });
+
+      mostraMessaggio("Ordine Creato", `Ordine creato con successo per ${atleta}.`, "success");
+    } catch (err) {
+      console.error("Errore creazione ordine admin:", err);
+      mostraMessaggio("Errore", "Impossibile creare l'ordine: " + err.message, "error");
+    }
+  }, [settoreAttivo, mostraMessaggio]);
+
+  // MODIFICA PROFILO ATLETA DA PARTE DELL'ADMIN CON AGGIORNAMENTO A CASCATA
+  const handleModificaProfiloDaAdmin = useCallback(async (utenteId, vecchioNome, nuoviDati) => {
+    try {
+      const isN = settoreAttivo === 'nuoto';
+      const campoAtleti = isN ? "atleti_nuoto" : "atleti_pallanuoto";
+      const campoCarrello = isN ? "carrello_nuoto" : "carrello_pallanuoto";
+      
+      const userRef = doc(db, "utenti", utenteId);
+      const userSnap = await getDoc(userRef);
+
+      if (!userSnap.exists()) {
+        mostraMessaggio("Errore", "Utente non trovato.", "error");
+        return;
+      }
+
+      const userData = userSnap.data();
+      const listaVecchia = userData[campoAtleti] || (!isN ? (userData.atleti || []) : []);
+      const nuovoNomeCompleto = `${nuoviDati.nome} ${nuoviDati.cognome}`.trim();
+
+      // 1. Aggiorna lista profili
+      const listaAggiornata = listaVecchia.map(a => {
+        const n = typeof a === 'object' ? `${a.nome || ''} ${a.cognome || ''}`.trim() : String(a).trim();
+        if (n.toLowerCase() === vecchioNome.toLowerCase()) {
+          return {
+            nome: nuoviDati.nome.trim(),
+            cognome: nuoviDati.cognome.trim(),
+            categoria: nuoviDati.categoria
+          };
+        }
+        return a;
+      });
+
+      // 2. Aggiorna eventuale carrello dell'utente su Firestore
+      const carrelloVecchi = userData[campoCarrello] || (!isN ? (userData.carrello || []) : []);
+      const carrelloAggiornato = (Array.isArray(carrelloVecchi) ? carrelloVecchi : []).map(item => {
+        if ((item.atleta || '').toLowerCase() === vecchioNome.toLowerCase()) {
+          return {
+            ...item,
+            atleta: nuovoNomeCompleto,
+            categoria: nuoviDati.categoria
+          };
+        }
+        return item;
+      });
+
+      const batch = writeBatch(db);
+      batch.update(userRef, { 
+        [campoAtleti]: listaAggiornata,
+        [campoCarrello]: carrelloAggiornato
+      });
+
+      // 3. Trova e aggiorna tutti gli ordini associati all'utente e alla disciplina
+      const qOrdini = query(
+        collection(db, "ordini"),
+        where("utente_id", "==", utenteId),
+        where("disciplina", "==", settoreAttivo)
+      );
+      const snapOrdini = await getDocs(qOrdini);
+
+      snapOrdini.forEach(ordDoc => {
+        const o = ordDoc.data();
+        if (o.stato_pagamento === "Annullato") return;
+
+        let modificato = false;
+        let articoliAgg = (o.articoli || []).map(art => {
+          if ((art.atleta || '').toLowerCase() === vecchioNome.toLowerCase()) {
+            modificato = true;
+            return {
+              ...art,
+              atleta: nuovoNomeCompleto,
+              categoria: nuoviDati.categoria
+            };
+          }
+          return art;
+        });
+
+        if ((o.atleta || '').toLowerCase() === vecchioNome.toLowerCase()) {
+          modificato = true;
+        }
+
+        if (modificato) {
+          batch.update(doc(db, "ordini", ordDoc.id), {
+            atleta: (o.atleta && o.atleta.toLowerCase() === vecchioNome.toLowerCase()) ? nuovoNomeCompleto : o.atleta,
+            categoria: (o.atleta && o.atleta.toLowerCase() === vecchioNome.toLowerCase()) ? nuoviDati.categoria : o.categoria,
+            articoli: articoliAgg,
+            aggiornato_il: serverTimestamp()
+          });
+        }
+      });
+
+      await batch.commit();
+      mostraMessaggio("Profilo Aggiornato", `Profilo aggiornato in "${nuovoNomeCompleto}" (${nuoviDati.categoria}).`, "success");
+    } catch (err) {
+      console.error("Errore modifica profilo admin:", err);
+      mostraMessaggio("Errore", err.message, "error");
+    }
+  }, [settoreAttivo, mostraMessaggio]);
+
+  // ELIMINAZIONE PROFILO DA PARTE DELL'ADMIN (CON CONTROLLO BACKEND)
+  const handleEliminaProfiloDaAdmin = useCallback(async (utenteId, profiloDaEliminare) => {
+    try {
+      const isN = settoreAttivo === 'nuoto';
+      const campoAtleti = isN ? "atleti_nuoto" : "atleti_pallanuoto";
+      const userRef = doc(db, "utenti", utenteId);
+      const userSnap = await getDoc(userRef);
+
+      if (!userSnap.exists()) {
+        mostraMessaggio("Errore", "Utente non trovato.", "error");
+        return;
+      }
+
+      const dati = userSnap.data();
+      const listaAttuale = dati[campoAtleti] || (!isN ? (dati.atleti || []) : []);
+      const nomeTarget = (profiloDaEliminare.nomeCompleto || `${profiloDaEliminare.nome || ''} ${profiloDaEliminare.cognome || ''}`).trim().toLowerCase();
+
+      // Verifica ordini pendenti sul database
+      const qOrdini = query(
+        collection(db, "ordini"),
+        where("utente_id", "==", utenteId),
+        where("disciplina", "==", settoreAttivo)
+      );
+      const snapOrdini = await getDocs(qOrdini);
+      let haPendenti = false;
+
+      snapOrdini.forEach(docSnap => {
+        const o = docSnap.data();
+        if (o.stato_pagamento === "Annullato") return;
+
+        const listaCapi = Array.isArray(o.articoli) && o.articoli.length > 0 ? o.articoli : [o];
+        const appartiene = listaCapi.some(c => (c.atleta || o.atleta || '').toLowerCase().trim() === nomeTarget);
+
+        if (appartiene && (!o.pagato || o.stato_pagamento === "In attesa" || o.stato_pagamento === "In lavorazione")) {
+          haPendenti = true;
+        }
+      });
+
+      if (haPendenti) {
+        mostraMessaggio(
+          "Eliminazione non consentita",
+          `Impossibile eliminare il profilo "${profiloDaEliminare.nomeCompleto}": risultano ordini pendenti o non saldati.`,
+          "warning"
+        );
+        return;
+      }
+
+      const nuovaLista = listaAttuale.filter(a => {
+        const n = typeof a === 'object' ? `${a.nome || ''} ${a.cognome || ''}`.trim().toLowerCase() : String(a).trim().toLowerCase();
+        return n !== nomeTarget;
+      });
+
+      await updateDoc(userRef, { [campoAtleti]: nuovaLista });
+      mostraMessaggio("Profilo Rimosso", `Il profilo "${profiloDaEliminare.nomeCompleto}" è stato eliminato.`, "info");
+    } catch (err) {
+      console.error("Errore rimozione profilo admin:", err);
+      mostraMessaggio("Errore", err.message, "error");
+    }
+  }, [settoreAttivo, mostraMessaggio]);
+
+  // ELIMINAZIONE ACCOUNT DA PARTE DELL'ADMIN (CON CONTROLLO BACKEND)
+  const handleEliminaAccountDaAdmin = useCallback(async (utenteId) => {
+    try {
+      const qOrdini = query(collection(db, "ordini"), where("utente_id", "==", utenteId));
+      const snapOrdini = await getDocs(qOrdini);
+      let haPendenti = false;
+
+      snapOrdini.forEach(docSnap => {
+        const o = docSnap.data();
+        if (o.stato_pagamento === "Annullato") return;
+        if (!o.pagato || o.stato_pagamento === "In attesa" || o.stato_pagamento === "In lavorazione") {
+          haPendenti = true;
+        }
+      });
+
+      if (haPendenti) {
+        mostraMessaggio(
+          "Eliminazione non consentita",
+          "Impossibile eliminare l'account: risultano ordini pendenti o non saldati.",
+          "warning"
+        );
+        return;
+      }
+
+      await deleteDoc(doc(db, "utenti", utenteId));
+      mostraMessaggio("Account Eliminato", "L'account cliente e tutti i suoi profili sono stati eliminati da Firestore.", "info");
+    } catch (err) {
+      console.error("Errore eliminazione account admin:", err);
+      mostraMessaggio("Errore", err.message, "error");
+    }
+  }, [mostraMessaggio]);
+
+  // AGGIUNTA PROFILO PER UN UTENTE DA PARTE DELL'ADMIN
+  const handleAggiungiProfiloDaAdmin = useCallback(async (utenteId, nuovoProfilo) => {
+    try {
+      const campoAtleti = settoreAttivo === 'nuoto' ? "atleti_nuoto" : "atleti_pallanuoto";
+      const userRef = doc(db, "utenti", utenteId);
+      await updateDoc(userRef, {
+        [campoAtleti]: arrayUnion(nuovoProfilo)
+      });
+      mostraMessaggio("Profilo Creato", `Profilo registrato con successo per ${nuovoProfilo.nome} ${nuovoProfilo.cognome}.`, "success");
+    } catch (err) {
+      console.error("Errore aggiunta profilo admin:", err);
+      mostraMessaggio("Errore", err.message, "error");
+    }
+  }, [settoreAttivo, mostraMessaggio]);
+
+  // MODIFICA NOMINATIVO ACCOUNT DA PARTE DELL'ADMIN A CASCATA
+  const handleModificaAccountDaAdmin = useCallback(async (utenteId, datiAccount) => {
+    try {
+      const nuovoNomeCompleto = `${datiAccount.nome.trim()} ${datiAccount.cognome.trim()}`.trim();
+      const userRef = doc(db, "utenti", utenteId);
+
+      const batch = writeBatch(db);
+      batch.update(userRef, {
+        nome: datiAccount.nome.trim(),
+        cognome: datiAccount.cognome.trim(),
+        aggiornato_il: serverTimestamp()
+      });
+
+      // Aggiorna la dicitura acquirente in tutti gli ordini dell'utente
+      const qOrdini = query(
+        collection(db, "ordini"),
+        where("utente_id", "==", utenteId)
+      );
+      const snapOrdini = await getDocs(qOrdini);
+
+      snapOrdini.forEach(ordDoc => {
+        batch.update(doc(db, "ordini", ordDoc.id), {
+          acquirente: nuovoNomeCompleto,
+          aggiornato_il: serverTimestamp()
+        });
+      });
+
+      await batch.commit();
+      mostraMessaggio("Account Aggiornato", `Nominativo salvato in "${nuovoNomeCompleto}".`, "success");
+    } catch (err) {
+      console.error("Errore modifica account admin:", err);
+      mostraMessaggio("Errore", err.message, "error");
+    }
+  }, [mostraMessaggio]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50">
@@ -1697,6 +2088,15 @@ Circolo Nuoto Lucca`
         />
       )}
 
+      {/* MODALE DI SBLOCCO PASSWORD CONDIVISO SU FIREBASE */}
+      <ModalSbloccoUtenti 
+        isOpen={mostraModalSbloccoUtenti}
+        onClose={() => setMostraModalSbloccoUtenti(false)}
+        onSblocca={handleConfermaSbloccoUtenti}
+        utenteLoggato={utenteLoggato}
+        mostraMessaggio={mostraMessaggio}
+      />
+
       {/* NAVBAR STICKY DIRETTA */}
       <Navbar 
         settoreUtente={settoreAttivo}
@@ -1708,7 +2108,8 @@ Circolo Nuoto Lucca`
         isUserAdmin={isUserAdminNelSettore}
         inizialiUtente={inizialiUtente}
         adminTab={adminTab}
-        onSetAdminTab={setAdminTab}
+        onSetAdminTab={handleCambiaAdminTab}
+        sezioneUtentiSbloccata={sezioneUtentiSbloccata}
         onApriCarrello={() => setMostraModalCarrello(true)}
         onApriProfilo={() => setMostraModalProfilo(true)}
         onLogout={handleLogout}
@@ -1750,7 +2151,6 @@ Circolo Nuoto Lucca`
         ) : (
           <PannelloAdmin 
             adminTab={adminTab}
-            onSetAdminTab={setAdminTab}
             statistiche={statisticheAdmin}
             ricerca={ricercaAdmin}
             onSetRicerca={setRicercaAdmin}
@@ -1758,6 +2158,7 @@ Circolo Nuoto Lucca`
             onSetFiltroStato={setFiltroStatoAdmin}
             ordiniRaggruppati={ordiniAdminRaggruppatiPerUtente}
             tuttiGliOrdini={tuttiGliOrdiniAdmin}
+            tuttiGliUtenti={tuttiGliUtenti}
             ordiniInAttesaCount={ordiniInAttesaCount}
             invioProduzioneInCorso={invioProduzioneInCorso}
             onInviaProduzione={mandaInLavorazioneConEmail}
@@ -1786,6 +2187,14 @@ Circolo Nuoto Lucca`
             settoreUtente={settoreAttivo}
             categorieSettore={categorieCorrenti}
             onZoomFoto={(src, alt) => setZoomImage({ src, alt })}
+            onCreaOrdinePerUtente={handleCreaOrdineAdminPerUtente}
+            onModificaProfiloUtente={handleModificaProfiloDaAdmin}
+            onAggiungiProfiloUtente={handleAggiungiProfiloDaAdmin}
+            onEliminaProfiloUtente={handleEliminaProfiloDaAdmin}
+            onEliminaAccountUtente={handleEliminaAccountDaAdmin}
+            onModificaAccountUtente={handleModificaAccountDaAdmin}
+            mostraMessaggio={mostraMessaggio}
+            chiediConferma={chiediConferma}
           />
         )}
       </main>

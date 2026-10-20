@@ -9,6 +9,11 @@ import {
   faBars, 
   faXmark,
   faChevronRight,
+  faUser,
+  faLayerGroup,
+  faReceipt,
+  faStore,
+  faLock
 } from '@fortawesome/free-solid-svg-icons';
 
 export default function Navbar({
@@ -19,6 +24,7 @@ export default function Navbar({
   carrelloCount = 0,
   totaleCarrello = 0,
   isUserAdmin = false,
+  sezioneUtentiSbloccata,
   inizialiUtente = 'CN',
   adminTab = 'ordini',
   onSetAdminTab,
@@ -54,7 +60,7 @@ export default function Navbar({
             </div>
           </div>
 
-          {/* SELETTORE DISCIPLINA */}
+          {/* SELETTORE DISCIPLINA (PER UTENTI NON ADMIN O CON SELETTORE ATTIVO) */}
           {mostraSelettoreSettore && (
             <div className="flex items-center h-10 sm:h-11 p-1 bg-slate-100 rounded-2xl border border-slate-200/80 shrink-0">
               <button
@@ -89,40 +95,65 @@ export default function Navbar({
             </div>
           )}
 
-          {/* TAB ADMIN DESKTOP */}
+          {/* SELETTORE TAB ADMIN DESKTOP */}
           {isUserAdmin && (
-            <div className="hidden lg:flex items-center h-11 p-1 bg-slate-100 rounded-2xl gap-1 shrink-0">
+            <div className="hidden md:flex items-center h-10 sm:h-11 p-1 bg-slate-100 rounded-2xl border border-slate-200/80 shrink-0">
               <button
                 type="button"
                 onClick={() => onSetAdminTab('ordini')}
-                className={`h-full px-3.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                  adminTab === 'ordini' ? 'bg-white text-[#002b80] font-black shadow-2xs' : 'text-slate-500 hover:text-slate-900'
+                className={`h-full px-3.5 sm:px-4 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer select-none flex items-center gap-2 ${
+                  adminTab === 'ordini'
+                    ? 'bg-white text-[#002b80] font-black shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-900'
                 }`}
               >
-                <FontAwesomeIcon icon={faClipboardList} className="text-sm" />
+                <FontAwesomeIcon icon={faReceipt} className="text-xs" />
                 <span>Ordini</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => onSetAdminTab('categorie')}
-                className={`h-full px-3.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                  adminTab === 'categorie' ? 'bg-white text-[#002b80] font-black shadow-2xs' : 'text-slate-500 hover:text-slate-900'
+                className={`h-full px-3.5 sm:px-4 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer select-none flex items-center gap-2 ${
+                  adminTab === 'categorie'
+                    ? 'bg-white text-[#002b80] font-black shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-900'
                 }`}
               >
-                <FontAwesomeIcon icon={faTags} className="text-sm" />
+                <FontAwesomeIcon icon={faLayerGroup} className="text-xs" />
                 <span>Categorie</span>
               </button>
 
+              {/* CATALOGO */}
               <button
                 type="button"
                 onClick={() => onSetAdminTab('catalogo')}
-                className={`h-full px-3.5 rounded-xl text-sm font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                  adminTab === 'catalogo' ? 'bg-white text-[#002b80] font-black shadow-2xs' : 'text-slate-500 hover:text-slate-900'
+                className={`h-full px-3.5 sm:px-4 rounded-xl text-xs sm:text-sm font-bold transition-all cursor-pointer select-none flex items-center gap-2 ${
+                  adminTab === 'catalogo'
+                    ? 'bg-white text-[#002b80] font-black shadow-2xs'
+                    : 'text-slate-500 hover:text-slate-900'
                 }`}
               >
-                <FontAwesomeIcon icon={faBoxesStacked} className="text-sm" />
+                <FontAwesomeIcon icon={faStore} className="text-xs" />
                 <span>Catalogo</span>
+              </button>
+
+              {/* PULSANTE TAB UTENTE CON BLOCCO VISIVO */}
+              <button
+                type="button"
+                onClick={() => onSetAdminTab('utenti')}
+                title={sezioneUtentiSbloccata ? "Gestione Utenti" : "Sezione protetta da password"}
+                className={`py-2 px-3.5 sm:px-4 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer select-none ${
+                  adminTab === 'utenti'
+                    ? 'bg-white text-[#002b80] font-black shadow-xs'
+                    : 'text-slate-500 hover:text-slate-900'
+                }`}
+              >
+                <FontAwesomeIcon 
+                  icon={sezioneUtentiSbloccata ? faUser : faLock} 
+                  className={!sezioneUtentiSbloccata ? "text-amber-600 text-xs" : "text-xs"} 
+                />
+                <span>Utente</span>
               </button>
             </div>
           )}
@@ -130,7 +161,7 @@ export default function Navbar({
           {/* AZIONI TOP BAR */}
           <div className="flex items-center gap-2 shrink-0">
             
-            {/* CARRELLO: SEMPRE FUORI ANCHE DA MOBILE */}
+            {/* CARRELLO (VISIBILE SOLO SE NON ADMIN) */}
             {!isUserAdmin && (
               <button
                 type="button"
@@ -176,7 +207,7 @@ export default function Navbar({
             <button
               type="button"
               onClick={() => setMobileMenuAperto(!mobileMenuAperto)}
-              className="sm:hidden w-10 h-10 bg-slate-100 text-slate-700 border border-slate-200 rounded-2xl flex items-center justify-center text-base cursor-pointer shrink-0"
+              className="md:hidden w-10 h-10 bg-slate-100 text-slate-700 border border-slate-200 rounded-2xl flex items-center justify-center text-base cursor-pointer shrink-0"
               aria-label="Menu"
             >
               <FontAwesomeIcon icon={mobileMenuAperto ? faXmark : faBars} />
@@ -186,11 +217,11 @@ export default function Navbar({
 
         </div>
 
-        {/* DRAWER MENU MOBILE CON HEADER CARD PROFILO RIVISITATA */}
+        {/* MENU A TENDINA MOBILE DA HAMBURGER */}
         {mobileMenuAperto && (
-          <div className="sm:hidden py-3.5 border-t border-slate-100 flex flex-col gap-2 animate-in slide-in-from-top-1">
+          <div className="md:hidden py-3.5 border-t border-slate-100 flex flex-col gap-2 animate-in slide-in-from-top-1">
             
-            {/* PROFILE HEADER CARD (UX RIVISITATA SENZA TASTO APRI) */}
+            {/* SCHEDA PROFILO */}
             <div
               onClick={() => { onApriProfilo(); setMobileMenuAperto(false); }}
               className="p-3 bg-gradient-to-r from-slate-50 to-blue-50/50 hover:from-blue-50/60 hover:to-blue-100/50 border border-slate-200/90 rounded-2xl flex items-center justify-between cursor-pointer transition-all active:scale-[0.99]"
@@ -215,7 +246,7 @@ export default function Navbar({
               </div>
             </div>
 
-            {/* TAB STAFF MOBILE SE ADMIN */}
+            {/* SELETTORE TAB MOBILE SE ADMIN */}
             {isUserAdmin && (
               <div className="space-y-1 pt-1">
                 <button
@@ -228,6 +259,7 @@ export default function Navbar({
                   <FontAwesomeIcon icon={faClipboardList} className="text-sm w-4" />
                   <span>Registro Ordini</span>
                 </button>
+
                 <button
                   type="button"
                   onClick={() => { onSetAdminTab('categorie'); setMobileMenuAperto(false); }}
@@ -238,6 +270,8 @@ export default function Navbar({
                   <FontAwesomeIcon icon={faTags} className="text-sm w-4" />
                   <span>Riepilogo Categorie</span>
                 </button>
+
+                {/* VOCE CATALOGO MOBILE */}
                 <button
                   type="button"
                   onClick={() => { onSetAdminTab('catalogo'); setMobileMenuAperto(false); }}
@@ -248,10 +282,22 @@ export default function Navbar({
                   <FontAwesomeIcon icon={faBoxesStacked} className="text-sm w-4" />
                   <span>Gestione Catalogo</span>
                 </button>
+
+                {/* VOCE UTENTE MOBILE */}
+                <button
+                  type="button"
+                  onClick={() => { onSetAdminTab('utenti'); setMobileMenuAperto(false); }}
+                  className={`w-full h-11 px-3.5 rounded-xl text-xs font-black flex items-center gap-3 transition-colors ${
+                    adminTab === 'utenti' ? 'bg-blue-50 text-[#002b80]' : 'text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <FontAwesomeIcon icon={faUser} className="text-sm w-4" />
+                  <span>Gestione Utenti & Profili</span>
+                </button>
               </div>
             )}
 
-            {/* TASTO LOGOUT */}
+            {/* TASTO LOGOUT MOBILE */}
             <button
               type="button"
               onClick={() => { setMobileMenuAperto(false); onLogout(); }}

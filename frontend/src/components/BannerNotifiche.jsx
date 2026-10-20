@@ -11,22 +11,31 @@ export default function BannerNotifiche({ notifiche = [], onConfermaPagamento })
   const handlePagaClick = () => {
     if (!notificaAperta) return;
     
-    // CONTIENE L'IMPORTO DOVUTO E VERIFICA SE MAGGIORE DI ZERO
-    const importoDovuto = Number(notificaAperta.totaleDovuto || 0);
-    const baseLink = notificaAperta.linkPaypal;
+    const importoIntero = Math.round(Number(notificaAperta.totaleDovuto || 0));
+    const baseLink = (notificaAperta.linkPaypal || '').replace("www.", "");
 
-    // CONCATENA DINAMICAMENTE L'IMPORTO SOLO SE > 0, EVITANDO ERRORI SE FOSSE GIÀ PRESENTE NELLA NOTIFICA
-    let linkDinamico = baseLink;
-    if (importoDovuto > 0 && baseLink && !baseLink.endsWith(importoDovuto.toFixed(2))) {
-      linkDinamico = `${baseLink.split('/')[0]}//${baseLink.split('/')[2]}/${baseLink.split('/')[3].split('?')[0]}/${importoDovuto.toFixed(2)}`;
-    }
+    // Estrae la radice dell'account PayPal (es. "https://paypal.me/CircoloNuotoLucca")
+    const baseMatch = baseLink.match(/^(https?:\/\/paypal\.me\/[^/?]+)/i);
+    const radicePaypal = baseMatch ? baseMatch[1] : baseLink.split('?')[0].replace(/\/+$/, '');
+
+    // Accoda solo l'importo arrotondato all'intero, senza decimali e senza valuta
+    const linkDinamico = importoIntero > 0 
+      ? `${radicePaypal}/${importoIntero}` 
+      : radicePaypal;
 
     if (onConfermaPagamento) {
       onConfermaPagamento(notificaAperta);
     }
     setNotificaAperta(null);
+
     if (linkDinamico) {
-      window.open(linkDinamico, '_blank', 'noopener,noreferrer');
+      const a = document.createElement('a');
+      a.href = linkDinamico;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
     }
   };
 
@@ -54,14 +63,12 @@ export default function BannerNotifiche({ notifiche = [], onConfermaPagamento })
                       {n.disciplina || 'Forniture'}
                     </span>
                   </div>
-                  {/* Testo intero visibile senza troncamento su mobile */}
                   <p className="text-xs font-semibold text-slate-700 mt-1 leading-snug break-words">
                     {n.messaggio}
                   </p>
                 </div>
               </div>
 
-              {/* Box Importo & Pulsante Saldo visibili sempre in modo prominente su mobile */}
               <div className="flex items-center justify-between sm:justify-end gap-2.5 pt-2 sm:pt-0 border-t sm:border-t-0 border-amber-500/20 shrink-0">
                 <div className="bg-white/90 border border-amber-300 px-3 py-1 rounded-xl shadow-2xs text-right">
                   <span className="text-[10px] font-black uppercase tracking-wider text-amber-800 block">Totale</span>
