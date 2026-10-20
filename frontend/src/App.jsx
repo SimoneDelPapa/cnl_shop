@@ -471,7 +471,7 @@ export default function App() {
     const qUtenti = collection(db, "utenti");
     const unsubscribe = onSnapshot(qUtenti, (snapshot) => {
       const users = snapshot.docs
-        .filter(d => d.id !== "config_sicurezza_admin") // <--- Esclude il documento di sicurezza
+        .filter(d => d.id !== "config_sicurezza_admin")
         .map(d => ({ id: d.id, ...d.data() }));
 
       users.sort((a, b) => {
@@ -990,11 +990,6 @@ export default function App() {
     // ========================================================
     // GERARCHIA ORDINAMENTO BASATA SU TAGLIE.JS
     // ========================================================
-    // Ricava l'elenco sequenziale di tutte le taglie previste nei cataloghi:
-    // 1. Taglia Unica
-    // 2. Junior (T-Shirt & Costumi)
-    // 3. Tessili Shorts / Adulti (4XS -> 3XL)
-    // 4. Numeriche Costumi (34 -> 56)
     const sequenzaCanonicaTaglie = Array.from(new Set([
       ...TAGLIA_UNICA,
       ...TAGLIE_TSHIRT_UNISEX_COMPLETO.filter(t => t.toLowerCase().includes('junior')),
@@ -1172,8 +1167,28 @@ export default function App() {
       let sezioneIndex = 1;
 
       gruppiPersonalizzatiPerArticolo.forEach((listaCapi, nomeArticolo) => {
-        // Capi ordinati per taglia crescente in accordo con la sequenza di taglie.js
-        listaCapi.sort((a, b) => confrontaTaglie(a.taglia, b.taglia));
+        // Capi ordinati per taglia e per numero di calotta crescente
+        listaCapi.sort((a, b) => {
+          const cmpTaglia = confrontaTaglie(a.taglia, b.taglia);
+          if (cmpTaglia !== 0) return cmpTaglia;
+
+          const numA = parseInt(a.numeroPersonalizzato, 10);
+          const numB = parseInt(b.numeroPersonalizzato, 10);
+          const hasNumA = !isNaN(numA);
+          const hasNumB = !isNaN(numB);
+
+          if (hasNumA && hasNumB) {
+            if (numA !== numB) return numA - numB;
+          } else if (hasNumA) {
+            return -1;
+          } else if (hasNumB) {
+            return 1;
+          }
+
+          const atlA = (a.atleta || '').trim();
+          const atlB = (b.atleta || '').trim();
+          return atlA.localeCompare(atlB, 'it', { sensitivity: 'base' });
+        });
 
         const articoloUsaNome = listaCapi.some(a => a.nomePersonalizzato && String(a.nomePersonalizzato).trim() !== "");
         const articoloUsaNumero = listaCapi.some(a => a.numeroPersonalizzato && String(a.numeroPersonalizzato).trim() !== "");
@@ -1996,6 +2011,63 @@ Circolo Nuoto Lucca`
     }
   }, [mostraMessaggio]);
 
+  // ELIMINAZIONE CAPO DAL CARRELLO DI UN UTENTE SPECIFICO (SUPERADMIN)
+  const handleRimuoviDalCarrelloUtenteDaAdmin = useCallback(async (utenteId, idUnivoco) => {
+    try {
+      const campoCarrello = settoreAttivo === 'nuoto' ? "carrello_nuoto" : "carrello_pallanuoto";
+      const isN = settoreAttivo === 'nuoto';
+      const userRef = doc(db, "utenti", utenteId);
+      const userSnap = await getDoc(userRef);
+
+      if (!userSnap.exists()) {
+        mostraMessaggio("Errore", "Utente non trovato.", "error");
+        return;
+      }
+
+      const userData = userSnap.data();
+      const carrelloAttuale = userData[campoCarrello] || (!isN ? (userData.carrello || []) : []);
+      const carrelloNuovo = (Array.isArray(carrelloAttuale) ? carrelloAttuale : []).filter(
+        item => item.idUnivoco !== idUnivoco
+      );
+
+      await updateDoc(userRef, { [campoCarrello]: carrelloNuovo });
+      mostraMessaggio("Carrello Aggiornato", "Capo rimosso dal carrello dell'utente.", "info");
+    } catch (err) {
+      console.error("Errore rimozione capo carrello utente:", err);
+      mostraMessaggio("Errore", err.message, "error");
+    }
+  }, [settoreAttivo, mostraMessaggio]);
+
+  // MODIFICA CAPO NEL CARRELLO DI UN UTENTE SPECIFICO (SUPERADMIN)
+  const handleAggiornaCapoCarrelloUtenteDaAdmin = useCallback(async (utenteId, capoAggiornato) => {
+    try {
+      const campoCarrello = settoreAttivo === 'nuoto' ? "carrello_nuoto" : "carrello_pallanuoto";
+      const isN = settoreAttivo === 'nuoto';
+      const userRef = doc(db, "utenti", utenteId);
+      const userSnap = await getDoc(userRef);
+
+      if (!userSnap.exists()) {
+        mostraMessaggio("Errore", "Utente non trovato.", "error");
+        return;
+      }
+
+      const userData = userSnap.data();
+      const carrelloAttuale = userData[campoCarrello] || (!isN ? (userData.carrello || []) : []);
+      const carrelloNuovo = (Array.isArray(carrelloAttuale) ? carrelloAttuale : []).map(item => {
+        if (item.idUnivoco === capoAggiornato.idUnivoco) {
+          return { ...capoAggiornato };
+        }
+        return item;
+      });
+
+      await updateDoc(userRef, { [campoCarrello]: carrelloNuovo });
+      mostraMessaggio("Carrello Aggiornato", "Articolo nel carrello modificato con successo.", "success");
+    } catch (err) {
+      console.error("Errore aggiornamento capo carrello utente:", err);
+      mostraMessaggio("Errore", err.message, "error");
+    }
+  }, [settoreAttivo, mostraMessaggio]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50">
@@ -2193,6 +2265,8 @@ Circolo Nuoto Lucca`
             onEliminaProfiloUtente={handleEliminaProfiloDaAdmin}
             onEliminaAccountUtente={handleEliminaAccountDaAdmin}
             onModificaAccountUtente={handleModificaAccountDaAdmin}
+            onRimuoviCapoCarrelloUtente={handleRimuoviDalCarrelloUtenteDaAdmin}
+            onModificaCapoCarrelloUtente={handleAggiornaCapoCarrelloUtenteDaAdmin}
             mostraMessaggio={mostraMessaggio}
             chiediConferma={chiediConferma}
           />

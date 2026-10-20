@@ -87,6 +87,8 @@ export default function PannelloAdmin({
   onEliminaProfiloUtente,
   onEliminaAccountUtente,
   onModificaAccountUtente,
+  onRimuoviCapoCarrelloUtente,
+  onModificaCapoCarrelloUtente,
   mostraMessaggio,
   chiediConferma
 }) {
@@ -109,11 +111,12 @@ export default function PannelloAdmin({
   const [modalSelezione, setModalSelezione] = useState(null);
   const [tipologieSelezionate, setTipologieSelezionate] = useState(() => new Set());
 
-  // MODALI ADMIN: CREA ORDINE, GESTIONE PROFILI, GESTIONE ACCOUNT
+  // MODALI ADMIN: CREA ORDINE, GESTIONE PROFILI, GESTIONE ACCOUNT, MODIFICA CARRELLO
   const [accountPerOrdine, setAccountPerOrdine] = useState(null);
   const [profiloInModifica, setProfiloInModifica] = useState(null);
   const [profiloInCreazione, setProfiloInCreazione] = useState(null);
   const [accountInModifica, setAccountInModifica] = useState(null);
+  const [capoCarrelloInModifica, setCapoCarrelloInModifica] = useState(null);
 
   // SCROLL LOCK SU TUTTI I MODALI
   useEffect(() => {
@@ -124,7 +127,8 @@ export default function PannelloAdmin({
       accountPerOrdine || 
       profiloInModifica || 
       profiloInCreazione || 
-      accountInModifica
+      accountInModifica ||
+      capoCarrelloInModifica
     );
 
     if (isQualsiasiModalAperto) {
@@ -142,7 +146,7 @@ export default function PannelloAdmin({
         if (top) window.scrollTo(0, parseInt(top || '0', 10) * -1);
       };
     }
-  }, [modalSelezione, prodottoInModifica, mostraAnteprimaCatalogo, accountPerOrdine, profiloInModifica, profiloInCreazione, accountInModifica]);
+  }, [modalSelezione, prodottoInModifica, mostraAnteprimaCatalogo, accountPerOrdine, profiloInModifica, profiloInCreazione, accountInModifica, capoCarrelloInModifica]);
 
   const ordiniInLavorazioneCount = useMemo(() => {
     return (tuttiGliOrdini || []).filter(o => o.stato_pagamento === "In lavorazione").length;
@@ -648,6 +652,58 @@ export default function PannelloAdmin({
 
     setAccountInModifica(null);
   };
+
+  // Calcolo taglie disponibili per il capo carrello attualmente in modifica da taglie.js
+  const taglieDisponibiliCapoInModifica = useMemo(() => {
+    if (!capoCarrelloInModifica) return ["Taglia Unica"];
+
+    // 1. Cerca il prodotto corrispondente nel catalogo corrente per trovarne la scala_taglie_id
+    const prodTarget = prodotti.find(p => 
+      (p.id && p.id === capoCarrelloInModifica.prodottoId) ||
+      (p.nome && p.nome.trim().toLowerCase() === (capoCarrelloInModifica.nomeProdotto || '').trim().toLowerCase())
+    );
+
+    if (prodTarget) {
+      if (prodTarget.taglia_unica) return ["Taglia Unica"];
+      if (prodTarget.scala_taglie_id) {
+        return getTaglieByScalaId(prodTarget.scala_taglie_id);
+      }
+      if (Array.isArray(prodTarget.taglie_disponibili) && prodTarget.taglie_disponibili.length > 0) {
+        return prodTarget.taglie_disponibili;
+      }
+    }
+
+    // 2. Se ha taglia_unica flaggata
+    if (capoCarrelloInModifica.taglia_unica || (capoCarrelloInModifica.taglia || '').toLowerCase().includes("unica")) {
+      return ["Taglia Unica"];
+    }
+
+    // 3. Fallback intelligente in base al settore e al nome capo
+    const scaleSettore = getOpzioniScaleSettore(settoreUtente);
+    const nomeCapo = (capoCarrelloInModifica.nomeProdotto || '').toLowerCase();
+    
+    if (nomeCapo.includes('zaino') || nomeCapo.includes('calotta')) {
+      return ["Taglia Unica"];
+    }
+    if (nomeCapo.includes('costume') && nomeCapo.includes('donna')) {
+      const s = scaleSettore.find(sc => sc.id.includes('costume_donna'));
+      return s ? s.taglie : getTaglieByScalaId(scaleSettore[0]?.id);
+    }
+    if (nomeCapo.includes('costume')) {
+      const s = scaleSettore.find(sc => sc.id.includes('costume_uomo'));
+      return s ? s.taglie : getTaglieByScalaId(scaleSettore[0]?.id);
+    }
+    if (nomeCapo.includes('tshirt') || nomeCapo.includes('t-shirt') || nomeCapo.includes('maglia')) {
+      const s = scaleSettore.find(sc => sc.id.includes('tshirt'));
+      return s ? s.taglie : getTaglieByScalaId(scaleSettore[0]?.id);
+    }
+    if (nomeCapo.includes('shorts') || nomeCapo.includes('pantaloncin')) {
+      const s = scaleSettore.find(sc => sc.id.includes('shorts'));
+      return s ? s.taglie : getTaglieByScalaId(scaleSettore[0]?.id);
+    }
+
+    return scaleSettore[0]?.taglie || ["Taglia Unica"];
+  }, [capoCarrelloInModifica, prodotti, settoreUtente]);
 
   return (
     <div className="space-y-6">
@@ -1949,13 +2005,14 @@ export default function PannelloAdmin({
                               {account.carrello.map((capo, cIdx) => (
                                 <div 
                                   key={`cart-item-${account.id}-${cIdx}`}
-                                  className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-center justify-between gap-3"
+                                  className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-center justify-between gap-3 hover:border-slate-300 transition-colors"
                                 >
-                                  <div className="flex items-center gap-3 min-w-0">
+                                  <div className="flex items-center gap-3 min-w-0 flex-1">
                                     {capo.immagine_url ? (
                                       <div 
                                         onClick={() => onZoomFoto && onZoomFoto(capo.immagine_url, capo.nomeProdotto)}
                                         className="w-11 h-11 rounded-xl bg-white border border-slate-200 p-0.5 flex items-center justify-center shrink-0 cursor-zoom-in"
+                                        title="Ingrandisci foto"
                                       >
                                         <img src={capo.immagine_url} alt="" className="w-full h-full object-contain" />
                                       </div>
@@ -1964,7 +2021,7 @@ export default function PannelloAdmin({
                                         <FontAwesomeIcon icon={faShirt} />
                                       </div>
                                     )}
-                                    <div className="min-w-0">
+                                    <div className="min-w-0 flex-1">
                                       <div className="flex items-center gap-2 flex-wrap">
                                         <span className="text-xs sm:text-sm font-black text-slate-900 truncate">
                                           {capo.nomeProdotto}
@@ -1979,17 +2036,17 @@ export default function PannelloAdmin({
                                       {(capo.nomePersonalizzato || capo.numeroPersonalizzato || capo.colorePersonalizzato) && (
                                         <div className="flex items-center gap-1 mt-1 flex-wrap">
                                           {capo.nomePersonalizzato && (
-                                            <span className="text-[9px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-1.5 py-0.2 rounded">
+                                            <span className="text-[9px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">
                                               "{capo.nomePersonalizzato}"
                                             </span>
                                           )}
                                           {capo.numeroPersonalizzato && (
-                                            <span className="text-[9px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-1.5 py-0.2 rounded">
+                                            <span className="text-[9px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">
                                               N° {capo.numeroPersonalizzato}
                                             </span>
                                           )}
                                           {capo.colorePersonalizzato && (
-                                            <span className="text-[9px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-1.5 py-0.2 rounded">
+                                            <span className="text-[9px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">
                                               {capo.colorePersonalizzato}
                                             </span>
                                           )}
@@ -1998,9 +2055,41 @@ export default function PannelloAdmin({
                                     </div>
                                   </div>
 
-                                  <span className="text-xs sm:text-sm font-black text-[#002b80] tabular-nums shrink-0">
-                                    €{Number(capo.prezzo || 0).toFixed(2)}
-                                  </span>
+                                  {/* PREZZO E AZIONI ICONICHE MODIFICA ED ELIMINAZIONE */}
+                                  <div className="flex items-center gap-2.5 shrink-0">
+                                    <span className="text-xs sm:text-sm font-black text-[#002b80] tabular-nums pr-1">
+                                      €{Number(capo.prezzo || 0).toFixed(2)}
+                                    </span>
+
+                                    {/* PULSANTE MODIFICA CAPO CARRELLO (SOLO ICONA) */}
+                                    <button
+                                      type="button"
+                                      onClick={() => setCapoCarrelloInModifica({ ...capo, utenteIdPadre: account.id })}
+                                      className="w-8 h-8 rounded-xl bg-white hover:bg-blue-50 text-[#002b80] border border-blue-200 flex items-center justify-center text-xs transition-all shadow-2xs active:scale-95 cursor-pointer"
+                                      title="Modifica articolo nel carrello"
+                                    >
+                                      <FontAwesomeIcon icon={faPenToSquare} />
+                                    </button>
+
+                                    {/* PULSANTE ELIMINA CAPO CARRELLO (SOLO ICONA) */}
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (chiediConferma) {
+                                          chiediConferma(
+                                            "Rimuovi dal Carrello",
+                                            `Confermi la rimozione dell'articolo "${capo.nomeProdotto}" (${capo.atleta || 'Profilo'}) dal carrello di ${account.nomeCompleto}?`,
+                                            () => onRimuoviCapoCarrelloUtente && onRimuoviCapoCarrelloUtente(account.id, capo.idUnivoco),
+                                            "Rimuovi Capo"
+                                          );
+                                        }
+                                      }}
+                                      className="w-8 h-8 rounded-xl bg-white hover:bg-red-50 text-red-600 border border-red-200 flex items-center justify-center text-xs transition-all shadow-2xs active:scale-95 cursor-pointer"
+                                      title="Rimuovi dal carrello"
+                                    >
+                                      <FontAwesomeIcon icon={faTrashCan} />
+                                    </button>
+                                  </div>
                                 </div>
                               ))}
                             </div>
@@ -2326,7 +2415,7 @@ export default function PannelloAdmin({
                 </div>
               </div>
               <button 
-                type="button"
+                type="button" 
                 onClick={() => setProfiloInModifica(null)}
                 className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center text-xs transition-colors cursor-pointer"
               >
@@ -2406,7 +2495,7 @@ export default function PannelloAdmin({
                 </div>
               </div>
               <button 
-                type="button"
+                type="button" 
                 onClick={() => setProfiloInCreazione(null)}
                 className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center text-xs transition-colors cursor-pointer"
               >
@@ -2488,7 +2577,7 @@ export default function PannelloAdmin({
                 </div>
               </div>
               <button 
-                type="button"
+                type="button" 
                 onClick={() => setAccountInModifica(null)}
                 className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center text-xs transition-colors cursor-pointer"
               >
@@ -2535,6 +2624,140 @@ export default function PannelloAdmin({
                   className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white font-black rounded-2xl text-xs sm:text-sm uppercase tracking-wider transition-all shadow-md flex items-center justify-center cursor-pointer"
                 >
                   Salva Modifiche Account
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          MODALE MODIFICA CAPO NEL CARRELLO UTENTE
+         ======================================================== */}
+      {capoCarrelloInModifica && (
+        <div 
+          className="fixed inset-0 z-55 flex items-center justify-center bg-slate-950/65 backdrop-blur-sm p-3.5 sm:p-5 animate-in fade-in duration-150 overflow-y-auto"
+          onClick={() => setCapoCarrelloInModifica(null)}
+        >
+          <div 
+            className="relative w-full max-w-sm sm:max-w-md bg-white rounded-3xl p-5 sm:p-6 shadow-2xl border border-slate-200 flex flex-col gap-4 my-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 text-[#002b80] flex items-center justify-center text-sm shadow-2xs">
+                  <FontAwesomeIcon icon={faPenToSquare} />
+                </div>
+                <h3 className="text-sm sm:text-base font-black text-slate-900 leading-tight">
+                  Modifica Capo nel Carrello
+                </h3>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setCapoCarrelloInModifica(null)}
+                className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center text-xs cursor-pointer"
+              >
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+
+            <form 
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (onModificaCapoCarrelloUtente) {
+                  onModificaCapoCarrelloUtente(capoCarrelloInModifica.utenteIdPadre, capoCarrelloInModifica);
+                }
+                setCapoCarrelloInModifica(null);
+              }}
+              className="space-y-3.5 flex-1 overflow-y-auto pr-1"
+            >
+              <div>
+                <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">
+                  Articolo
+                </label>
+                <input 
+                  type="text" 
+                  disabled 
+                  value={capoCarrelloInModifica.nomeProdotto} 
+                  className="w-full h-11 bg-slate-100 border border-slate-200 rounded-xl px-3.5 text-xs sm:text-sm font-bold text-slate-600 cursor-not-allowed"
+                />
+              </div>
+
+              {/* SELEZIONE TAGLIA DA TAGLIE.JS */}
+              <div>
+                <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">
+                  Taglia
+                </label>
+                {taglieDisponibiliCapoInModifica.length === 1 && taglieDisponibiliCapoInModifica[0] === "Taglia Unica" ? (
+                  <input 
+                    type="text"
+                    disabled
+                    value="Taglia Unica"
+                    className="w-full h-11 bg-slate-100 border border-slate-200 rounded-xl px-3.5 text-xs sm:text-sm font-bold text-slate-600 cursor-not-allowed"
+                  />
+                ) : (
+                  <select
+                    value={capoCarrelloInModifica.taglia}
+                    onChange={e => setCapoCarrelloInModifica({ ...capoCarrelloInModifica, taglia: e.target.value })}
+                    className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none focus:border-[#002b80] cursor-pointer"
+                  >
+                    {taglieDisponibiliCapoInModifica.map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {capoCarrelloInModifica.nomePersonalizzato !== undefined && capoCarrelloInModifica.nomePersonalizzato !== null && (
+                <div>
+                  <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">
+                    Nome Stampato
+                  </label>
+                  <input 
+                    type="text" 
+                    value={capoCarrelloInModifica.nomePersonalizzato || ''} 
+                    onChange={e => setCapoCarrelloInModifica({ ...capoCarrelloInModifica, nomePersonalizzato: e.target.value.toUpperCase() })}
+                    className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3.5 text-xs sm:text-sm font-bold text-slate-900 focus:outline-none focus:border-[#002b80]"
+                  />
+                </div>
+              )}
+
+              {capoCarrelloInModifica.numeroPersonalizzato !== undefined && capoCarrelloInModifica.numeroPersonalizzato !== null && (
+                <div>
+                  <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">
+                    Numero Calotta
+                  </label>
+                  <input 
+                    type="text" 
+                    value={capoCarrelloInModifica.numeroPersonalizzato || ''} 
+                    onChange={e => setCapoCarrelloInModifica({ ...capoCarrelloInModifica, numeroPersonalizzato: e.target.value })}
+                    className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3.5 text-xs sm:text-sm font-bold text-slate-900 focus:outline-none focus:border-[#002b80]"
+                  />
+                </div>
+              )}
+
+              {capoCarrelloInModifica.colorePersonalizzato !== undefined && capoCarrelloInModifica.colorePersonalizzato !== null && (
+                <div>
+                  <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">
+                    Colore Calotta
+                  </label>
+                  <select 
+                    value={capoCarrelloInModifica.colorePersonalizzato || 'BIANCA'} 
+                    onChange={e => setCapoCarrelloInModifica({ ...capoCarrelloInModifica, colorePersonalizzato: e.target.value })}
+                    className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none focus:border-[#002b80] cursor-pointer"
+                  >
+                    <option value="BIANCA">BIANCA</option>
+                    <option value="BLU">BLU</option>
+                  </select>
+                </div>
+              )}
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  className="w-full h-12 bg-[#002b80] hover:bg-[#002060] active:scale-[0.99] text-white font-black rounded-2xl text-xs sm:text-sm uppercase tracking-wider transition-all shadow-md flex items-center justify-center cursor-pointer"
+                >
+                  Salva Modifiche Capo
                 </button>
               </div>
             </form>
