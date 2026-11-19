@@ -53,6 +53,7 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
   const [mostraTastoReinviaVerifica, setMostraTastoReinviaVerifica] = useState(false);
 
   const [prodottiCarosello, setProdottiCarosello] = useState([]);
+  const [loadingProdotti, setLoadingProdotti] = useState(true);
   const [slideCorrente, setSlideCorrente] = useState(0);
 
   // SCROLL-LOCK TOTALE DI SOTTOFONDO PER IL MODALE ZOOM NELLA PAGINA DI LOGIN
@@ -101,7 +102,11 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
         .map(d => ({ id: d.id, ...d.data() }))
         .filter(p => p.attivo !== false);
       setProdottiCarosello(prods);
-    }, (err) => console.error("Errore carosello:", err));
+      setLoadingProdotti(false);
+    }, (err) => {
+      console.error("Errore carosello:", err);
+      setLoadingProdotti(false);
+    });
 
     return () => unsubscribe();
   }, [settoreCarosello]);
@@ -116,6 +121,7 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
 
   const cambiaSettore = (nuovoSettore) => {
     if (nuovoSettore === settoreCarosello) return;
+    setLoadingProdotti(true);
     setSettoreCarosello(nuovoSettore);
     setSlideCorrente(0);
     sessionStorage.setItem("cnl_settore_richiesto", nuovoSettore);
@@ -581,7 +587,9 @@ export default function Auth({ onLoginSuccess, externalError, onClearExternalErr
           ) : (
             <div className="py-12 text-center bg-white/5 border border-white/10 rounded-3xl p-6">
               <FontAwesomeIcon icon={faShirt} className="text-3xl text-white/30 mb-2" />
-              <p className="text-sm font-bold text-white/80">Caricamento articoli...</p>
+              <p className="text-sm font-bold text-white/80">
+                {loadingProdotti ? "Caricamento articoli..." : "Nessun articolo"}
+              </p>
             </div>
           )}
         </div>
