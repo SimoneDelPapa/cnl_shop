@@ -12,8 +12,7 @@ import {
   faUser,
   faLayerGroup,
   faReceipt,
-  faStore,
-  faLock
+  faStore
 } from '@fortawesome/free-solid-svg-icons';
 
 export default function Navbar({
@@ -24,7 +23,7 @@ export default function Navbar({
   carrelloCount = 0,
   totaleCarrello = 0,
   isUserAdmin = false,
-  sezioneUtentiSbloccata,
+  isSuperAdmin = false,
   inizialiUtente = 'CN',
   adminTab = 'ordini',
   onSetAdminTab,
@@ -53,14 +52,14 @@ export default function Navbar({
                 </span>
                 {isUserAdmin && (
                   <span className="bg-slate-100 text-[#002b80] text-[10px] font-black uppercase px-1.5 py-0.5 rounded tracking-wider">
-                    STAFF
+                    {isSuperAdmin ? 'SUPERADMIN' : 'STAFF'}
                   </span>
                 )}
               </div>
             </div>
           </div>
 
-          {/* SELETTORE DISCIPLINA (PER UTENTI NON ADMIN O CON SELETTORE ATTIVO) */}
+          {/* SELETTORE DISCIPLINA (PER UTENTI NON ADMIN E SUPERADMIN) */}
           {mostraSelettoreSettore && (
             <div className="flex items-center h-10 sm:h-11 p-1 bg-slate-100 rounded-2xl border border-slate-200/80 shrink-0">
               <button
@@ -73,7 +72,7 @@ export default function Navbar({
                 }`}
               >
                 <span>Pallanuoto</span>
-                {sollecitiPerSettore.pallanuoto && (
+                {!isUserAdmin && sollecitiPerSettore.pallanuoto && (
                   <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse ring-2 ring-white shrink-0" />
                 )}
               </button>
@@ -88,7 +87,7 @@ export default function Navbar({
                 }`}
               >
                 <span>Nuoto</span>
-                {sollecitiPerSettore.nuoto && (
+                {!isUserAdmin && sollecitiPerSettore.nuoto && (
                   <span className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse ring-2 ring-white shrink-0" />
                 )}
               </button>
@@ -138,23 +137,22 @@ export default function Navbar({
                 <span>Catalogo</span>
               </button>
 
-              {/* PULSANTE TAB UTENTE CON BLOCCO VISIVO */}
-              <button
-                type="button"
-                onClick={() => onSetAdminTab('utenti')}
-                title={sezioneUtentiSbloccata ? "Gestione Utenti" : "Sezione protetta da password"}
-                className={`py-2 px-3.5 sm:px-4 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer select-none ${
-                  adminTab === 'utenti'
-                    ? 'bg-white text-[#002b80] font-black shadow-xs'
-                    : 'text-slate-500 hover:text-slate-900'
-                }`}
-              >
-                <FontAwesomeIcon 
-                  icon={sezioneUtentiSbloccata ? faUser : faLock} 
-                  className={!sezioneUtentiSbloccata ? "text-amber-600 text-xs" : "text-xs"} 
-                />
-                <span>Utente</span>
-              </button>
+              {/* PULSANTE TAB UTENTE (SOLO SUPERADMIN) */}
+              {isSuperAdmin && (
+                <button
+                  type="button"
+                  onClick={() => onSetAdminTab('utenti')}
+                  title="Gestione Utenti & Profili"
+                  className={`h-full px-3.5 sm:px-4 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer select-none ${
+                    adminTab === 'utenti'
+                      ? 'bg-white text-[#002b80] font-black shadow-2xs'
+                      : 'text-slate-500 hover:text-slate-900'
+                  }`}
+                >
+                  <FontAwesomeIcon icon={faUser} className="text-xs" />
+                  <span>Utente</span>
+                </button>
+              )}
             </div>
           )}
 
@@ -283,17 +281,19 @@ export default function Navbar({
                   <span>Gestione Catalogo</span>
                 </button>
 
-                {/* VOCE UTENTE MOBILE */}
-                <button
-                  type="button"
-                  onClick={() => { onSetAdminTab('utenti'); setMobileMenuAperto(false); }}
-                  className={`w-full h-11 px-3.5 rounded-xl text-xs font-black flex items-center gap-3 transition-colors ${
-                    adminTab === 'utenti' ? 'bg-blue-50 text-[#002b80]' : 'text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  <FontAwesomeIcon icon={faUser} className="text-sm w-4" />
-                  <span>Gestione Utenti & Profili</span>
-                </button>
+                {/* VOCE UTENTE MOBILE (SOLO SUPERADMIN) */}
+                {isSuperAdmin && (
+                  <button
+                    type="button"
+                    onClick={() => { onSetAdminTab('utenti'); setMobileMenuAperto(false); }}
+                    className={`w-full h-11 px-3.5 rounded-xl text-xs font-black flex items-center gap-3 transition-colors ${
+                      adminTab === 'utenti' ? 'bg-blue-50 text-[#002b80]' : 'text-slate-700 hover:bg-slate-50'
+                    }`}
+                  >
+                    <FontAwesomeIcon icon={faUser} className="text-sm w-4" />
+                    <span>Gestione Utenti & Profili</span>
+                  </button>
+                )}
               </div>
             )}
 

@@ -7,9 +7,9 @@ import {
   faPenToSquare, 
   faArrowRight, 
   faShirt,
-  faLock
+  faLock,
+  faReceipt
 } from '@fortawesome/free-solid-svg-icons';
-import { faPaypal } from '@fortawesome/free-brands-svg-icons';
 
 const NUMERI_CALOTTA = Array.from({ length: 15 }, (_, i) => i + 1);
 
@@ -262,8 +262,8 @@ export default function ModalCarrello({
                 onClick={onCheckout}
                 className="w-full h-12 sm:h-14 bg-[#002b80] hover:bg-[#002060] disabled:bg-slate-300 text-white font-black rounded-2xl text-xs sm:text-sm uppercase tracking-wider transition-all shadow-md flex items-center justify-center gap-2.5 cursor-pointer active:scale-[0.99]"
               >
-                <FontAwesomeIcon icon={faPaypal} className="text-base sm:text-lg" />
-                <span>{isCheckout ? "Elaborazione in corso..." : "Paga con PayPal"}</span>
+                <FontAwesomeIcon icon={faReceipt} className="text-base sm:text-lg" />
+                <span>{isCheckout ? "Invio in corso..." : "Conferma Ordine"}</span>
                 <FontAwesomeIcon icon={faArrowRight} className="text-xs" />
               </button>
             </div>
@@ -495,7 +495,6 @@ export default function ModalCarrello({
                 </div>
               )}
 
-              {/* PULSANTE SALVA MODIFICHE */}
               <div className="pt-3.5 mt-2 border-t border-slate-100 shrink-0">
                 <button
                   type="submit"

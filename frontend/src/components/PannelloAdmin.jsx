@@ -31,6 +31,9 @@ import {
   faCartShopping,
   faUsers,
   faUserPlus,
+  faBoxArchive,
+  faClockRotateLeft,
+  faTriangleExclamation
 } from '@fortawesome/free-solid-svg-icons';
 
 import { getOpzioniScaleSettore, getTaglieByScalaId } from '../utils/taglie';
@@ -53,12 +56,15 @@ export default function PannelloAdmin({
   onSetFiltroStato,
   ordiniRaggruppati = [],
   tuttiGliOrdini = [],
+  archivioOrdini = [],
   tuttiGliUtenti = [],
   ordiniInAttesaCount = 0,
   invioProduzioneInCorso = false,
   onInviaProduzione,
   onImpostaProntiRitiro,
   onEsportaCsv,
+  onArchiviaOrdineCorrente,
+  onEsportaArchivioXlsx,
   onAggiornaOrdine,
   onToggleCompletatoArticolo,
   onApriModificaOrdine,
@@ -118,6 +124,29 @@ export default function PannelloAdmin({
   const [accountInModifica, setAccountInModifica] = useState(null);
   const [capoCarrelloInModifica, setCapoCarrelloInModifica] = useState(null);
 
+  // MODALI ARCHIVIO ORDINI STAGIONALI
+  const [mostraModalArchivia, setMostraModalArchivia] = useState(false);
+  const [titoloNuovoArchivio, setTitoloNuovoArchivio] = useState('');
+  const [countdownArchivia, setCountdownArchivia] = useState(5);
+  const [mostraModalStoricoArchivi, setMostraModalStoricoArchivi] = useState(false);
+
+  // TIMER DI SICUREZZA 5 SECONDI PER CONFERMA ARCHIVIAZIONE
+  useEffect(() => {
+    if (!mostraModalArchivia) return;
+
+    const interval = setInterval(() => {
+      setCountdownArchivia(prev => {
+        if (prev <= 1) {
+          clearInterval(interval);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [mostraModalArchivia]);
+
   // SCROLL LOCK SU TUTTI I MODALI
   useEffect(() => {
     const isQualsiasiModalAperto = Boolean(
@@ -128,7 +157,9 @@ export default function PannelloAdmin({
       profiloInModifica || 
       profiloInCreazione || 
       accountInModifica ||
-      capoCarrelloInModifica
+      capoCarrelloInModifica ||
+      mostraModalArchivia ||
+      mostraModalStoricoArchivi
     );
 
     if (isQualsiasiModalAperto) {
@@ -146,7 +177,18 @@ export default function PannelloAdmin({
         if (top) window.scrollTo(0, parseInt(top || '0', 10) * -1);
       };
     }
-  }, [modalSelezione, prodottoInModifica, mostraAnteprimaCatalogo, accountPerOrdine, profiloInModifica, profiloInCreazione, accountInModifica, capoCarrelloInModifica]);
+  }, [
+    modalSelezione, 
+    prodottoInModifica, 
+    mostraAnteprimaCatalogo, 
+    accountPerOrdine, 
+    profiloInModifica, 
+    profiloInCreazione, 
+    accountInModifica, 
+    capoCarrelloInModifica,
+    mostraModalArchivia,
+    mostraModalStoricoArchivi
+  ]);
 
   const ordiniInLavorazioneCount = useMemo(() => {
     return (tuttiGliOrdini || []).filter(o => o.stato_pagamento === "In lavorazione").length;
@@ -407,7 +449,11 @@ export default function PannelloAdmin({
           categoria: cat,
           profili: profiliList,
           totaleCapi: profiliList.reduce((acc, p) => acc + p.articoli.length, 0),
-          totaleConsegnati: profiliList.reduce((acc, p) => acc + p.articoli.filter(a => a.completato).length, 0)
+          totaleConsegnati: profiliList.reduce((acc, p) => acc + p.articoli.filter(a => a.completato).length, 0),
+          totaleProntiRitiro: profiliList.reduce(
+            (acc, p) => acc + p.articoli.filter(a => !a.completato && a.statoOrdine === 'Pronto per il ritiro').length,
+            0
+          )
         };
       });
   }, [ordiniRaggruppati, categorieSettore, settoreUtente, ricercaCategorie]);
@@ -657,7 +703,6 @@ export default function PannelloAdmin({
   const taglieDisponibiliCapoInModifica = useMemo(() => {
     if (!capoCarrelloInModifica) return ["Taglia Unica"];
 
-    // 1. Cerca il prodotto corrispondente nel catalogo corrente per trovarne la scala_taglie_id
     const prodTarget = prodotti.find(p => 
       (p.id && p.id === capoCarrelloInModifica.prodottoId) ||
       (p.nome && p.nome.trim().toLowerCase() === (capoCarrelloInModifica.nomeProdotto || '').trim().toLowerCase())
@@ -673,12 +718,10 @@ export default function PannelloAdmin({
       }
     }
 
-    // 2. Se ha taglia_unica flaggata
     if (capoCarrelloInModifica.taglia_unica || (capoCarrelloInModifica.taglia || '').toLowerCase().includes("unica")) {
       return ["Taglia Unica"];
     }
 
-    // 3. Fallback intelligente in base al settore e al nome capo
     const scaleSettore = getOpzioniScaleSettore(settoreUtente);
     const nomeCapo = (capoCarrelloInModifica.nomeProdotto || '').toLowerCase();
     
@@ -780,7 +823,7 @@ export default function PannelloAdmin({
             </div>
           </div>
 
-          {/* BARRA COMANDI, FILTRI & 4 PULSANTI ICONA */}
+          {/* BARRA COMANDI, FILTRI & PULSANTI (GRIGLIA 2x3 MOBILE / EXPANDABLE DESKTOP) */}
           <div className="bg-white border border-slate-200/90 rounded-3xl p-4 sm:p-5 shadow-xs flex flex-col xl:flex-row gap-4 justify-between items-stretch xl:items-center">
             
             <div className="flex flex-col sm:flex-row gap-3 flex-1">
@@ -817,64 +860,104 @@ export default function PannelloAdmin({
               </select>
             </div>
 
-            <div className="flex items-center justify-end gap-2.5 shrink-0">
+            <div className="grid grid-cols-2 sm:flex sm:items-center sm:justify-end gap-2 sm:gap-2.5 shrink-0 w-full xl:w-auto">
               
+              {/* 1. LAVORAZIONE */}
               <button 
                 type="button"
                 onClick={() => apriModalSelezione('lavorazione')}
                 disabled={ordiniInAttesaCount === 0 || invioProduzioneInCorso}
-                className="group h-12 w-12 hover:w-44 bg-[#002b80] hover:bg-[#002060] disabled:bg-slate-100 disabled:text-slate-400 text-white font-black rounded-2xl transition-all duration-300 ease-in-out shadow-xs flex items-center overflow-hidden cursor-pointer shrink-0 disabled:cursor-not-allowed"
+                className="group h-11 sm:h-12 w-full sm:w-12 sm:hover:w-40 bg-[#002b80] hover:bg-[#002060] disabled:bg-slate-100 disabled:text-slate-400 text-white font-black rounded-2xl transition-all duration-300 ease-in-out shadow-xs flex items-center justify-center sm:justify-start px-3 sm:px-0 overflow-hidden cursor-pointer shrink-0 disabled:cursor-not-allowed active:scale-[0.98]"
                 title="Manda in lavorazione per tipologia"
               >
-                <div className="w-12 h-12 flex items-center justify-center shrink-0">
-                  <FontAwesomeIcon icon={faPaperPlane} className="text-sm" />
+                <div className="w-5 sm:w-12 h-full flex items-center justify-center shrink-0 mr-2 sm:mr-0">
+                  <FontAwesomeIcon icon={faPaperPlane} className="text-xs sm:text-sm" />
                 </div>
-                <span className="max-w-0 group-hover:max-w-xs opacity-0 group-hover:opacity-100 whitespace-nowrap transition-all duration-300 pr-0 group-hover:pr-4 overflow-hidden text-xs sm:text-sm font-black">
-                  Lavorazione {ordiniInAttesaCount > 0 && `(${ordiniInAttesaCount})`}
+                <span className="max-w-full sm:max-w-0 sm:group-hover:max-w-xs opacity-100 sm:opacity-0 sm:group-hover:opacity-100 whitespace-nowrap transition-all duration-300 pr-0 sm:group-hover:pr-4 overflow-hidden text-xs sm:text-sm font-black truncate">
+                  Lavorazione
                 </span>
               </button>
 
+              {/* 2. PRONTI RITIRO */}
               <button 
                 type="button"
                 onClick={() => apriModalSelezione('pronto_ritiro')}
                 disabled={ordiniInLavorazioneCount === 0}
-                className="group h-12 w-12 hover:w-44 bg-amber-500 hover:bg-amber-600 disabled:bg-slate-100 disabled:text-slate-400 text-white font-black rounded-2xl transition-all duration-300 ease-in-out shadow-xs flex items-center overflow-hidden cursor-pointer shrink-0 disabled:cursor-not-allowed"
+                className="group h-11 sm:h-12 w-full sm:w-12 sm:hover:w-40 bg-amber-500 hover:bg-amber-600 disabled:bg-slate-100 disabled:text-slate-400 text-white font-black rounded-2xl transition-all duration-300 ease-in-out shadow-xs flex items-center justify-center sm:justify-start px-3 sm:px-0 overflow-hidden cursor-pointer shrink-0 disabled:cursor-not-allowed active:scale-[0.98]"
                 title="Pronto per il ritiro per tipologia"
               >
-                <div className="w-12 h-12 flex items-center justify-center shrink-0">
-                  <FontAwesomeIcon icon={faBoxesPacking} className="text-sm" />
+                <div className="w-5 sm:w-12 h-full flex items-center justify-center shrink-0 mr-2 sm:mr-0">
+                  <FontAwesomeIcon icon={faBoxesPacking} className="text-xs sm:text-sm" />
                 </div>
-                <span className="max-w-0 group-hover:max-w-xs opacity-0 group-hover:opacity-100 whitespace-nowrap transition-all duration-300 pr-0 group-hover:pr-4 overflow-hidden text-xs sm:text-sm font-black">
-                  Pronti Ritiro {ordiniInLavorazioneCount > 0 && `(${ordiniInLavorazioneCount})`}
+                <span className="max-w-full sm:max-w-0 sm:group-hover:max-w-xs opacity-100 sm:opacity-0 sm:group-hover:opacity-100 whitespace-nowrap transition-all duration-300 pr-0 sm:group-hover:pr-4 overflow-hidden text-xs sm:text-sm font-black truncate">
+                  Pronti Ritiro
                 </span>
               </button>
 
+              {/* 3. SOLLECITA */}
               <button 
                 type="button"
                 onClick={onInviaSollecitoMassivo}
                 disabled={morosiCount === 0}
-                className="group h-12 w-12 hover:w-36 bg-orange-600 hover:bg-orange-700 disabled:bg-slate-100 disabled:text-slate-400 text-white font-black rounded-2xl transition-all duration-300 ease-in-out shadow-xs flex items-center overflow-hidden cursor-pointer shrink-0 disabled:cursor-not-allowed"
+                className="group h-11 sm:h-12 w-full sm:w-12 sm:hover:w-32 bg-orange-600 hover:bg-orange-700 disabled:bg-slate-100 disabled:text-slate-400 text-white font-black rounded-2xl transition-all duration-300 ease-in-out shadow-xs flex items-center justify-center sm:justify-start px-3 sm:px-0 overflow-hidden cursor-pointer shrink-0 disabled:cursor-not-allowed active:scale-[0.98]"
                 title="Sollecita Pagamento a tutti"
               >
-                <div className="w-12 h-12 flex items-center justify-center shrink-0">
-                  <FontAwesomeIcon icon={faBell} className="text-sm" />
+                <div className="w-5 sm:w-12 h-full flex items-center justify-center shrink-0 mr-2 sm:mr-0">
+                  <FontAwesomeIcon icon={faBell} className="text-xs sm:text-sm" />
                 </div>
-                <span className="max-w-0 group-hover:max-w-xs opacity-0 group-hover:opacity-100 whitespace-nowrap transition-all duration-300 pr-0 group-hover:pr-4 overflow-hidden text-xs sm:text-sm font-black">
-                  Sollecita {morosiCount > 0 && `(${morosiCount})`}
+                <span className="max-w-full sm:max-w-0 sm:group-hover:max-w-xs opacity-100 sm:opacity-0 sm:group-hover:opacity-100 whitespace-nowrap transition-all duration-300 pr-0 sm:group-hover:pr-4 overflow-hidden text-xs sm:text-sm font-black truncate">
+                  Sollecita
                 </span>
               </button>
 
+              {/* 4. EXCEL */}
               <button 
                 type="button"
                 onClick={onEsportaCsv} 
-                className="group h-12 w-12 hover:w-36 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl transition-all duration-300 ease-in-out shadow-xs flex items-center overflow-hidden cursor-pointer shrink-0"
+                className="group h-11 sm:h-12 w-full sm:w-12 sm:hover:w-32 bg-emerald-600 hover:bg-emerald-700 text-white font-black rounded-2xl transition-all duration-300 ease-in-out shadow-xs flex items-center justify-center sm:justify-start px-3 sm:px-0 overflow-hidden cursor-pointer shrink-0 active:scale-[0.98]"
                 title="Esporta XLSX"
               >
-                <div className="w-12 h-12 flex items-center justify-center shrink-0">
-                  <FontAwesomeIcon icon={faFileExcel} className="text-sm" />
+                <div className="w-5 sm:w-12 h-full flex items-center justify-center shrink-0 mr-2 sm:mr-0">
+                  <FontAwesomeIcon icon={faFileExcel} className="text-xs sm:text-sm" />
                 </div>
-                <span className="max-w-0 group-hover:max-w-xs opacity-0 group-hover:opacity-100 whitespace-nowrap transition-all duration-300 pr-0 group-hover:pr-4 overflow-hidden text-xs sm:text-sm font-black">
+                <span className="max-w-full sm:max-w-0 sm:group-hover:max-w-xs opacity-100 sm:opacity-0 sm:group-hover:opacity-100 whitespace-nowrap transition-all duration-300 pr-0 sm:group-hover:pr-4 overflow-hidden text-xs sm:text-sm font-black truncate">
                   Excel
+                </span>
+              </button>
+
+              {/* 5. ARCHIVIA ORDINE */}
+              <button 
+                type="button"
+                onClick={() => {
+                  const numeroProssimoOrdine = (archivioOrdini?.length || 0) + 1;
+                  setTitoloNuovoArchivio(`${numeroProssimoOrdine}° Ordine Stagione ${new Date().getFullYear()}`);
+                  setCountdownArchivia(5);
+                  setMostraModalArchivia(true);
+                }}
+                disabled={(tuttiGliOrdini || []).length === 0}
+                className="group h-11 sm:h-12 w-full sm:w-12 sm:hover:w-36 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-100 disabled:text-slate-400 text-white font-black rounded-2xl transition-all duration-300 ease-in-out shadow-xs flex items-center justify-center sm:justify-start px-3 sm:px-0 overflow-hidden cursor-pointer shrink-0 disabled:cursor-not-allowed active:scale-[0.98]"
+                title="Archivia ordine corrente e inizia un nuovo ciclo"
+              >
+                <div className="w-5 sm:w-12 h-full flex items-center justify-center shrink-0 mr-2 sm:mr-0">
+                  <FontAwesomeIcon icon={faBoxArchive} className="text-xs sm:text-sm" />
+                </div>
+                <span className="max-w-full sm:max-w-0 sm:group-hover:max-w-xs opacity-100 sm:opacity-0 sm:group-hover:opacity-100 whitespace-nowrap transition-all duration-300 pr-0 sm:group-hover:pr-4 overflow-hidden text-xs sm:text-sm font-black truncate">
+                  Archivia
+                </span>
+              </button>
+
+              {/* 6. STORICO ARCHIVI */}
+              <button 
+                type="button"
+                onClick={() => setMostraModalStoricoArchivi(true)}
+                className="group h-11 sm:h-12 w-full sm:w-12 sm:hover:w-32 bg-slate-800 hover:bg-slate-900 text-white font-black rounded-2xl transition-all duration-300 ease-in-out shadow-xs flex items-center justify-center sm:justify-start px-3 sm:px-0 overflow-hidden cursor-pointer shrink-0 active:scale-[0.98]"
+                title="Consulta lo storico ordini archiviati"
+              >
+                <div className="w-5 sm:w-12 h-full flex items-center justify-center shrink-0 mr-2 sm:mr-0">
+                  <FontAwesomeIcon icon={faClockRotateLeft} className="text-xs sm:text-sm" />
+                </div>
+                <span className="max-w-full sm:max-w-0 sm:group-hover:max-w-xs opacity-100 sm:opacity-0 sm:group-hover:opacity-100 whitespace-nowrap transition-all duration-300 pr-0 sm:group-hover:pr-4 overflow-hidden text-xs sm:text-sm font-black truncate">
+                  Storico
                 </span>
               </button>
 
@@ -899,7 +982,7 @@ export default function PannelloAdmin({
           <div className="space-y-4">
             {ordiniRaggruppati.length === 0 ? (
               <div className="p-16 text-center bg-white border border-slate-200/80 rounded-3xl shadow-xs">
-                <p className="text-sm font-bold text-slate-400 italic">Nessun ordine corrispondente ai criteri di ricerca.</p>
+                <p className="text-sm font-bold text-slate-400 italic">Nessun ordine attivo corrispondente ai criteri di ricerca.</p>
               </div>
             ) : (
               ordiniRaggruppati.map((gruppo) => {
@@ -1153,7 +1236,7 @@ export default function PannelloAdmin({
       )}
 
       {/* ========================================================
-          TAB 2: RIEPILOGO CATEGORIE (SENZA TASTO MODIFICA PROFILO)
+          TAB 2: RIEPILOGO CATEGORIE (CON NOTIFICA AMBRA PRONTI AL RITIRO)
          ======================================================== */}
       {adminTab === 'categorie' && (
         <div className="space-y-6 animate-in fade-in duration-150">
@@ -1214,8 +1297,9 @@ export default function PannelloAdmin({
             </div>
           ) : (
             <div className="space-y-4">
-              {datiCategorie.map(({ categoria, profili, totaleCapi, totaleConsegnati }) => {
+              {datiCategorie.map(({ categoria, profili, totaleCapi, totaleConsegnati, totaleProntiRitiro }) => {
                 const isCatAperta = categorieEspanse.has(categoria) || Boolean(ricercaCategorie);
+                const haProntiCategoria = totaleProntiRitiro > 0;
 
                 return (
                   <div 
@@ -1239,7 +1323,12 @@ export default function PannelloAdmin({
                           <FontAwesomeIcon icon={isCatAperta ? faChevronUp : faChevronDown} />
                         </div>
                         <div className="flex items-center gap-2 flex-wrap min-w-0">
-                          <span className="w-2.5 h-2.5 rounded-full bg-[#002b80] shrink-0"></span>
+                          <span 
+                            className={`w-2.5 h-2.5 rounded-full shrink-0 ${
+                              haProntiCategoria ? 'bg-amber-500 animate-pulse ring-4 ring-amber-500/20' : 'bg-[#002b80]'
+                            }`}
+                            title={haProntiCategoria ? `${totaleProntiRitiro} capi pronti per il ritiro` : undefined}
+                          ></span>
                           <h4 className="text-base sm:text-lg font-black text-slate-900 truncate">{categoria}</h4>
                           <span className="text-xs font-bold text-slate-400">
                             ({profili.length} {profili.length === 1 ? 'profilo' : 'profili'})
@@ -1261,6 +1350,10 @@ export default function PannelloAdmin({
                           const isProfAperto = profiliCategoriaEspansi.has(chiaveProfilo) || Boolean(ricercaCategorie);
                           const capiConsegnatiProfilo = profilo.articoli.filter(a => a.completato).length;
                           const tuttiConsegnati = capiConsegnatiProfilo === profilo.articoli.length && profilo.articoli.length > 0;
+                          const prontiRitiroProfilo = profilo.articoli.filter(
+                            a => !a.completato && a.statoOrdine === 'Pronto per il ritiro'
+                          ).length;
+                          const haProntiProfilo = prontiRitiroProfilo > 0;
 
                           return (
                             <div 
@@ -1283,9 +1376,17 @@ export default function PannelloAdmin({
                                   </div>
 
                                   <div className="min-w-0">
-                                    <h5 className="text-sm sm:text-base font-black text-slate-900 leading-tight truncate">
-                                      {profilo.nomeCompleto}
-                                    </h5>
+                                    <div className="flex items-center gap-2">
+                                      {haProntiProfilo && (
+                                        <span 
+                                          className="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse ring-4 ring-amber-500/20 shrink-0"
+                                          title={`${prontiRitiroProfilo} ${prontiRitiroProfilo === 1 ? 'capo pronto' : 'capi pronti'} per il ritiro`}
+                                        ></span>
+                                      )}
+                                      <h5 className="text-sm sm:text-base font-black text-slate-900 leading-tight truncate">
+                                        {profilo.nomeCompleto}
+                                      </h5>
+                                    </div>
                                     <span className="text-[11px] text-slate-400 font-semibold truncate block mt-0.5">
                                       Acquirente: {profilo.acquirente}
                                     </span>
@@ -2908,6 +3009,176 @@ export default function PannelloAdmin({
                   }
                 </span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          MODALE: ARCHIVIA ORDINE CORRENTE (CON AVVISO E TIMER 5s)
+         ======================================================== */}
+      {mostraModalArchivia && (
+        <div 
+          className="fixed inset-0 z-55 flex items-center justify-center bg-slate-950/65 backdrop-blur-sm p-3.5 sm:p-5 animate-in fade-in duration-150 overflow-y-auto"
+          onClick={() => setMostraModalArchivia(false)}
+        >
+          <div 
+            className="relative w-full max-w-sm sm:max-w-md bg-white rounded-3xl p-5 sm:p-6 shadow-2xl border border-slate-200 flex flex-col gap-4 my-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-indigo-50 text-indigo-700 flex items-center justify-center text-base shadow-2xs">
+                  <FontAwesomeIcon icon={faBoxArchive} />
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-indigo-700 block">Chiusura Ciclo</span>
+                  <h3 className="text-sm sm:text-base font-black text-slate-900 leading-tight">
+                    Archivia Ordine Corrente
+                  </h3>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setMostraModalArchivia(false)}
+                className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center text-xs cursor-pointer"
+              >
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+
+            <form 
+              onSubmit={(e) => {
+                e.preventDefault();
+                if (countdownArchivia > 0 || !titoloNuovoArchivio.trim()) return;
+                if (onArchiviaOrdineCorrente) {
+                  onArchiviaOrdineCorrente(titoloNuovoArchivio.trim());
+                }
+                setMostraModalArchivia(false);
+              }}
+              className="space-y-4"
+            >
+              {/* BOX DI AVVISO IRREVERSIBILITÀ */}
+              <div className="p-3.5 rounded-2xl bg-red-50/90 border border-red-200 text-red-900 flex items-start gap-3">
+                <FontAwesomeIcon icon={faTriangleExclamation} className="text-red-600 text-base mt-0.5 shrink-0" />
+                <div className="text-xs leading-relaxed font-semibold">
+                  <strong className="font-black uppercase tracking-wider block text-red-700 mb-0.5">
+                    Attenzione: azione irreversibile
+                  </strong>
+                  Stai per archiviare definitivamente tutti i <strong className="font-black text-red-950">{(tuttiGliOrdini || []).length} capi</strong> attualmente presenti. Una volta confermata, l'operazione non potrà essere annullata e i contatori verranno azzerati per il nuovo ordine.
+                </div>
+              </div>
+
+              <div>
+                <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">
+                  Nome Identificativo Ordine
+                </label>
+                <input 
+                  type="text" 
+                  required
+                  value={titoloNuovoArchivio}
+                  onChange={e => setTitoloNuovoArchivio(e.target.value)}
+                  placeholder="Es. 1° Ordine Stagione 2026/27"
+                  className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3.5 text-sm font-bold text-slate-900 focus:outline-none focus:border-indigo-600"
+                />
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={countdownArchivia > 0 || !titoloNuovoArchivio.trim()}
+                  className={`w-full h-12 px-4 font-black rounded-2xl text-xs sm:text-sm uppercase tracking-wider transition-all flex items-center justify-center gap-2 whitespace-nowrap ${
+                    countdownArchivia > 0
+                      ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                      : 'bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white shadow-md cursor-pointer'
+                  }`}
+                >
+                  <FontAwesomeIcon icon={faBoxArchive} className="shrink-0" />
+                  <span>
+                    {countdownArchivia > 0
+                      ? `Attendi (${countdownArchivia}s)`
+                      : 'Conferma'}
+                  </span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          MODALE: STORICO ORDINI ARCHIVIATI
+         ======================================================== */}
+      {mostraModalStoricoArchivi && (
+        <div 
+          className="fixed inset-0 z-55 flex items-center justify-center bg-slate-950/65 backdrop-blur-sm p-3.5 sm:p-5 animate-in fade-in duration-150 overflow-y-auto"
+          onClick={() => setMostraModalStoricoArchivi(false)}
+        >
+          <div 
+            className="relative w-full max-w-lg sm:max-w-2xl bg-white rounded-3xl p-5 sm:p-6 shadow-2xl border border-slate-200 max-h-[90dvh] flex flex-col my-auto"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between pb-3.5 border-b border-slate-100 mb-3.5 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-slate-100 text-slate-800 flex items-center justify-center text-base shadow-2xs">
+                  <FontAwesomeIcon icon={faClockRotateLeft} />
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">Stagione Sportiva</span>
+                  <h3 className="text-base sm:text-lg font-black text-slate-900 leading-tight">
+                    Storico Ordini Archiviati ({archivioOrdini?.length || 0})
+                  </h3>
+                </div>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setMostraModalStoricoArchivi(false)}
+                className="w-8 h-8 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center text-xs cursor-pointer"
+              >
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto pr-1 space-y-3 custom-scrollbar">
+              {(!archivioOrdini || archivioOrdini.length === 0) ? (
+                <div className="p-12 text-center bg-slate-50 rounded-2xl">
+                  <p className="text-sm font-bold text-slate-400 italic">
+                    Nessun ordine archiviato finora per {settoreUtente.toUpperCase()}.
+                  </p>
+                </div>
+              ) : (
+                archivioOrdini.map(arch => (
+                  <div 
+                    key={arch.id}
+                    className="p-4 bg-slate-50 border border-slate-200/90 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                  >
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="text-sm sm:text-base font-black text-slate-900 truncate">
+                          {arch.titolo}
+                        </h4>
+                        <span className="text-[10px] font-black uppercase bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-md">
+                          {arch.totale_capi} {arch.totale_capi === 1 ? 'capo' : 'capi'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 font-semibold">
+                        Archiviato il {formattaData(arch.data_archiviazione)} • Valore: <strong className="text-slate-800">€{Number(arch.valore_totale || 0).toFixed(2)}</strong>
+                      </p>
+                    </div>
+
+                    {onEsportaArchivioXlsx && (
+                      <button
+                        type="button"
+                        onClick={() => onEsportaArchivioXlsx(arch)}
+                        className="h-10 px-4 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black rounded-xl flex items-center justify-center gap-2 transition-colors shadow-2xs cursor-pointer shrink-0"
+                      >
+                        <FontAwesomeIcon icon={faFileExcel} />
+                        <span>Scarica Excel</span>
+                      </button>
+                    )}
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>

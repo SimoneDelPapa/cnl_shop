@@ -15,7 +15,8 @@ import {
   faBoxesPacking,
   faPenToSquare,
   faChevronDown,
-  faChevronUp
+  faChevronUp,
+  faBoxArchive
 } from '@fortawesome/free-solid-svg-icons';
 import { faPaypal } from '@fortawesome/free-brands-svg-icons';
 
@@ -37,7 +38,7 @@ export default function NegozioUtente({
   onAnnullaOrdine
 }) {
   const [mostraModalPaypal, setMostraModalPaypal] = useState(false);
-  const [vistaAttiva, setVistaAttiva] = useState('catalogo');
+  const [vistaAttiva, setVistaAttiva] = useState('ordini');
   const [atletiEspansi, setAtletiEspansi] = useState(() => new Set());
 
   // Tracciamo il settore precedente per rilevare il cambio durante il render (senza cascading render)
@@ -45,7 +46,7 @@ export default function NegozioUtente({
 
   if (prevSettore !== settoreUtente) {
     setPrevSettore(settoreUtente);
-    setVistaAttiva('catalogo');
+    setVistaAttiva('ordini');
     setAtletiEspansi(new Set());
   }
 
@@ -118,7 +119,9 @@ export default function NegozioUtente({
             idOrdinePadre: ord.id, 
             statoOrdine: ord.stato_pagamento, 
             pagatoOrdine: ord.pagato, 
-            dataCreazione: ord.creato_il 
+            dataCreazione: ord.creato_il,
+            archiviato: Boolean(ord.archiviato),
+            lottoArchivio: ord.lotto_archivio || null
           }))
         : [{
             idUnivoco: ord.id,
@@ -135,7 +138,9 @@ export default function NegozioUtente({
             completato: ord.stato_pagamento === "Completato",
             statoOrdine: ord.stato_pagamento,
             pagatoOrdine: ord.pagato,
-            dataCreazione: ord.creato_il
+            dataCreazione: ord.creato_il,
+            archiviato: Boolean(ord.archiviato),
+            lottoArchivio: ord.lotto_archivio || null
           }];
 
       listaCapi.forEach(capo => {
@@ -229,27 +234,9 @@ export default function NegozioUtente({
         />
       )}
 
-      {/* BARRA SWITCH CATALOGO / FORNITURE CON TASTO SALDO SEMPRE VISIBILE */}
+      {/* BARRA SWITCH ORDINI / CATALOGO CON TASTO SALDO SEMPRE VISIBILE */}
       <div className="w-full flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 p-1.5 bg-slate-100/90 rounded-2xl border border-slate-200/80 box-border">
         <div className="flex items-center gap-1.5 flex-1">
-          <button
-            type="button"
-            onClick={() => setVistaAttiva('catalogo')}
-            className={`flex-1 py-2 px-3 sm:px-4 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer select-none ${
-              vistaAttiva === 'catalogo'
-                ? 'bg-white text-[#002b80] font-black shadow-2xs'
-                : 'text-slate-500 hover:text-slate-900'
-            }`}
-          >
-            <FontAwesomeIcon icon={faStore} className="text-xs sm:text-sm" />
-            <span>Catalogo</span>
-            <span className={`text-xs px-2 py-0.5 rounded-md font-black ${
-              vistaAttiva === 'catalogo' ? 'bg-blue-50 text-[#002b80]' : 'bg-slate-200 text-slate-600'
-            }`}>
-              {prodottiVisibili.length}
-            </span>
-          </button>
-
           <button
             type="button"
             onClick={() => setVistaAttiva('ordini')}
@@ -265,6 +252,24 @@ export default function NegozioUtente({
               vistaAttiva === 'ordini' ? 'bg-blue-50 text-[#002b80]' : 'bg-slate-200 text-slate-600'
             }`}>
               {totaleCapiRichiesti}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setVistaAttiva('catalogo')}
+            className={`flex-1 py-2 px-3 sm:px-4 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center justify-center gap-2 cursor-pointer select-none ${
+              vistaAttiva === 'catalogo'
+                ? 'bg-white text-[#002b80] font-black shadow-2xs'
+                : 'text-slate-500 hover:text-slate-900'
+            }`}
+          >
+            <FontAwesomeIcon icon={faStore} className="text-xs sm:text-sm" />
+            <span>Catalogo</span>
+            <span className={`text-xs px-2 py-0.5 rounded-md font-black ${
+              vistaAttiva === 'catalogo' ? 'bg-blue-50 text-[#002b80]' : 'bg-slate-200 text-slate-600'
+            }`}>
+              {prodottiVisibili.length}
             </span>
           </button>
         </div>
@@ -376,11 +381,16 @@ export default function NegozioUtente({
                         const stato = art.statoOrdine || "In attesa";
                         const isConsegnato = Boolean(art.completato || stato === 'Completato');
                         const isInAttesa = stato === "In attesa";
+                        const isArchiviato = Boolean(art.archiviato);
 
                         return (
                           <div 
                             key={`ticket-${art.idUnivoco || idx}`}
-                            className="bg-slate-50/80 hover:bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 sm:p-4 transition-all flex flex-col md:flex-row md:items-center justify-between gap-3.5"
+                            className={`border rounded-2xl p-3.5 sm:p-4 transition-all flex flex-col md:flex-row md:items-center justify-between gap-3.5 ${
+                              isArchiviato
+                                ? 'bg-slate-100/60 border-slate-200/70 opacity-90'
+                                : 'bg-slate-50/80 hover:bg-slate-50 border-slate-200/80'
+                            }`}
                           >
                             <div className="flex items-start sm:items-center gap-3.5 min-w-0 flex-1">
                               {art.immagine_url ? (
@@ -405,6 +415,15 @@ export default function NegozioUtente({
                                   <span className="text-xs font-black uppercase text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded-md">
                                     Taglia: {art.taglia}
                                   </span>
+                                  {isArchiviato && (
+                                    <span 
+                                      className="text-[10px] font-black uppercase text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md flex items-center gap-1"
+                                      title={art.lottoArchivio ? `Appartiene a: ${art.lottoArchivio}` : "Ordine concluso e archiviato"}
+                                    >
+                                      <FontAwesomeIcon icon={faBoxArchive} className="text-[9px]" />
+                                      <span>{art.lottoArchivio || "Archiviato"}</span>
+                                    </span>
+                                  )}
                                 </div>
 
                                 <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400">
@@ -461,7 +480,7 @@ export default function NegozioUtente({
                                 €{Number(art.prezzo || 0).toFixed(2)}
                               </span>
 
-                              {isInAttesa && onApriModificaOrdine && (
+                              {isInAttesa && !isArchiviato && onApriModificaOrdine && (
                                 <button
                                   type="button"
                                   onClick={() => onApriModificaOrdine({ id: art.idOrdinePadre, ...art, articoli: [art] })}
@@ -474,7 +493,7 @@ export default function NegozioUtente({
                               )}
 
                               {/* ANNULLA FORNITURA IN ROSSO CON CONFERMA */}
-                              {!isSaldato && isInAttesa && (
+                              {!isSaldato && isInAttesa && !isArchiviato && (
                                 <button
                                   type="button"
                                   onClick={() => onAnnullaOrdine({ id: art.idOrdinePadre, totale: art.prezzo, articoli: [art] })}

@@ -23,7 +23,6 @@ import CustomModal from './components/CustomModal';
 import BannerNotifiche from './components/BannerNotifiche';
 import ToastNotification from './components/ToastNotification';
 import XLSX from 'xlsx-js-style';
-import ModalSbloccoUtenti from './components/ModalSbloccoUtenti';
 
 import { auth, db } from './firebase';
 import { onAuthStateChanged, signOut, deleteUser } from 'firebase/auth';
@@ -43,6 +42,8 @@ import {
   arrayUnion, 
   writeBatch
 } from 'firebase/firestore';
+import { faCircleCheck, faXmark } from '@fortawesome/free-solid-svg-icons';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 
 // NUOVI LINK PAYPAL AGGIORNATI E SALVATI (senza www)
 const PAYPAL_LINKS = {
@@ -73,6 +74,7 @@ export default function App() {
   const [prodotti, setProdotti] = useState([]);
   const [ordiniUtente, setOrdiniUtente] = useState([]);
   const [tuttiGliOrdiniAdmin, setTuttiGliOrdiniAdmin] = useState([]);
+  const [archivioOrdiniAdmin, setArchivioOrdiniAdmin] = useState([]);
   const [tuttiGliUtenti, setTuttiGliUtenti] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isCheckout, setIsCheckout] = useState(false);
@@ -83,12 +85,7 @@ export default function App() {
   const [mostraModalProfilo, setMostraModalProfilo] = useState(false);
   const [mostraModalCarrello, setMostraModalCarrello] = useState(false);
   const [mostraGuidaPrimoAccesso, setMostraGuidaPrimoAccesso] = useState(false);
-
-  // GESTIONE SBLOCCO PASSWORD SEZIONE UTENTE
-  const [sezioneUtentiSbloccata, setSezioneUtentiSbloccata] = useState(() => {
-    return sessionStorage.getItem("cnl_sezione_utenti_sbloccata") === "true";
-  });
-  const [mostraModalSbloccoUtenti, setMostraModalSbloccoUtenti] = useState(false);
+  const [mostraModalSuccessoOrdine, setMostraModalSuccessoOrdine] = useState(false);
 
   const [settoreScelto, setSettoreScelto] = useState(() => {
     return sessionStorage.getItem("cnl_settore_richiesto") || 'pallanuoto';
@@ -126,25 +123,6 @@ export default function App() {
   const [filtroStatoAdmin, setFiltroStatoAdmin] = useState('Tutti');
   const [ricercaAdmin, setRicercaAdmin] = useState('');
 
-  // NAVIGAZIONE TAB PROTETTA DA PASSWORD PER 'UTENTI'
-  const handleCambiaAdminTab = useCallback((nuovaTab) => {
-    if (nuovaTab === 'utenti' && !sezioneUtentiSbloccata) {
-      setMostraModalSbloccoUtenti(true);
-      return;
-    }
-    setAdminTab(nuovaTab);
-    sessionStorage.setItem("cnl_admin_tab", nuovaTab);
-  }, [sezioneUtentiSbloccata]);
-
-  const handleConfermaSbloccoUtenti = useCallback(() => {
-    setSezioneUtentiSbloccata(true);
-    sessionStorage.setItem("cnl_sezione_utenti_sbloccata", "true");
-    setMostraModalSbloccoUtenti(false);
-    setAdminTab('utenti');
-    sessionStorage.setItem("cnl_admin_tab", 'utenti');
-    mostraMessaggio("Accesso Consentito", "Sezione Utente sbloccata per questa sessione.", "success");
-  }, [mostraMessaggio]);
-
   const [nuovoProd, setNuovoProd] = useState({ 
     nome: '', 
     prezzo: '', 
@@ -163,19 +141,26 @@ export default function App() {
 
   const adminRuolo = useMemo(() => {
     const r = (utenteLoggato?.isAdmin || "").toLowerCase();
-    return (r === "pallanuoto" || r === "nuoto") ? r : null;
+    return (r === "pallanuoto" || r === "nuoto" || r === "superadmin") ? r : null;
   }, [utenteLoggato]);
 
-  const settoreAttivo = adminRuolo || settoreScelto;
+  const isSuperAdmin = adminRuolo === 'superadmin';
+
+  const handleCambiaAdminTab = useCallback((nuovaTab) => {
+    if (nuovaTab === 'utenti' && !isSuperAdmin) return;
+    setAdminTab(nuovaTab);
+    sessionStorage.setItem("cnl_admin_tab", nuovaTab);
+  }, [isSuperAdmin]);
+
+  const settoreAttivo = (adminRuolo && !isSuperAdmin) ? adminRuolo : settoreScelto;
 
   const cambiaSettore = useCallback((nuovoSettore) => {
-    if (adminRuolo) return;
+    if (adminRuolo && !isSuperAdmin) return;
     setSettoreScelto(nuovoSettore);
     sessionStorage.setItem("cnl_settore_richiesto", nuovoSettore);
     
-    // Riporta istantaneamente lo scroll in alto senza ricaricare la pagina
     window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
-  }, [adminRuolo]);
+  }, [adminRuolo, isSuperAdmin]);
 
   const linkPaypalSettore = PAYPAL_LINKS[settoreAttivo] || PAYPAL_LINKS.pallanuoto;
   const categorieCorrenti = useMemo(() => {
@@ -183,8 +168,8 @@ export default function App() {
   }, [settoreAttivo]);
 
   const isUserAdminNelSettore = useMemo(() => {
-    return Boolean(adminRuolo && adminRuolo === settoreAttivo);
-  }, [adminRuolo, settoreAttivo]);
+    return Boolean(isSuperAdmin || (adminRuolo && adminRuolo === settoreAttivo));
+  }, [isSuperAdmin, adminRuolo, settoreAttivo]);
 
   const carrello = useMemo(() => {
     if (!utenteLoggato) return [];
@@ -206,7 +191,6 @@ export default function App() {
       : (Array.isArray(utenteLoggato.atleti) ? utenteLoggato.atleti : []);
   }, [utenteLoggato, settoreAttivo]);
 
-  // CONTROLLO ATTIVAZIONE GUIDA PRIMO ACCESSO
   useEffect(() => {
     if (!loading && utenteLoggato && !isUserAdminNelSettore) {
       const userId = utenteLoggato.id || utenteLoggato.auth_uid;
@@ -229,15 +213,14 @@ export default function App() {
     setMostraGuidaPrimoAccesso(false);
   }, [utenteLoggato]);
 
-  // SCROLL-LOCK SENZA POSIZIONAMENTO FISSO DEL BODY
   const isQualcheModalAperto = Boolean(
     mostraModalCarrello || 
     mostraGuidaPrimoAccesso || 
     mostraModalProfilo || 
     zoomImage || 
     ordineInModifica || 
-    modalConfig.isOpen ||
-    mostraModalSbloccoUtenti
+    modalConfig.isOpen || 
+    mostraModalSuccessoOrdine
   );
 
   useEffect(() => {
@@ -282,6 +265,7 @@ export default function App() {
         setUtenteLoggato(null);
         setOrdiniUtente([]);
         setTuttiGliOrdiniAdmin([]);
+        setArchivioOrdiniAdmin([]);
         setTuttiGliUtenti([]);
         setNotificheUtente([]);
         setLoading(false);
@@ -302,9 +286,6 @@ export default function App() {
       setSettoreScelto('pallanuoto');
       sessionStorage.removeItem("cnl_settore_richiesto");
       sessionStorage.removeItem("cnl_admin_tab");
-      sessionStorage.removeItem("cnl_sezione_utenti_sbloccata");
-      setSezioneUtentiSbloccata(false);
-      setMostraModalSbloccoUtenti(false);
       setMostraModalCarrello(false);
       setMostraModalProfilo(false);
       setOrdineInModifica(null);
@@ -356,7 +337,7 @@ export default function App() {
         return;
       }
 
-      if (utenteLoggato.isAdmin && utenteLoggato.isAdmin !== "no") {
+      if (utenteLoggato.isAdmin && utenteLoggato.isAdmin !== "no" && utenteLoggato.isAdmin !== "superadmin") {
         const qOrdiniAdminSettore = query(
           collection(db, "ordini"),
           where("disciplina", "==", utenteLoggato.isAdmin),
@@ -464,7 +445,29 @@ export default function App() {
     return () => unsubscribe();
   }, [utenteLoggato, isUserAdminNelSettore, settoreAttivo]);
 
-  // Ascolto in tempo reale di TUTTI gli account su Firestore senza esclusioni da orderBy
+  useEffect(() => {
+    if (!utenteLoggato || !isUserAdminNelSettore) return;
+    const qArchivio = query(
+      collection(db, "archivio_ordini"),
+      where("disciplina", "==", settoreAttivo)
+    );
+    const unsubscribe = onSnapshot(qArchivio, (snapshot) => {
+      const list = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      list.sort((a, b) => {
+        const tA = a.data_archiviazione?.toMillis ? a.data_archiviazione.toMillis() : new Date(a.data_archiviazione || 0).getTime();
+        const tB = b.data_archiviazione?.toMillis ? b.data_archiviazione.toMillis() : new Date(b.data_archiviazione || 0).getTime();
+        return tB - tA;
+      });
+      setArchivioOrdiniAdmin(list);
+    }, (err) => console.error("Errore fetch archivio:", err));
+
+    return () => unsubscribe();
+  }, [utenteLoggato, isUserAdminNelSettore, settoreAttivo]);
+
+  const ordiniAttiviAdmin = useMemo(() => {
+    return tuttiGliOrdiniAdmin.filter(o => !o.archiviato);
+  }, [tuttiGliOrdiniAdmin]);
+
   useEffect(() => {
     if (!utenteLoggato || !isUserAdminNelSettore) return;
 
@@ -904,17 +907,12 @@ export default function App() {
   const gestisciCheckout = useCallback(() => {
     if (!utenteLoggato || carrello.length === 0) return;
     const campoCarrello = settoreAttivo === 'nuoto' ? "carrello_nuoto" : "carrello_pallanuoto";
-    
-    // Genera il link formattato correttamente con valuta EUR senza decimali superflui
-    const linkPaypalConImporto = formattaPaypalLink(linkPaypalSettore, totaleCarrello);
 
     chiediConferma(
       "Conferma Ordine",
-      `Confermi l'invio di ${carrello.length} ${carrello.length === 1 ? 'capo' : 'capi'} per il settore ${settoreAttivo.toUpperCase()} (€${totaleCarrello.toFixed(2)})? Si aprirà PayPal per il pagamento.`,
+      `Confermi l'invio di ${carrello.length} ${carrello.length === 1 ? 'capo' : 'capi'} per il settore ${settoreAttivo.toUpperCase()} (€${totaleCarrello.toFixed(2)})? L'ordine verrà registrato nel sistema.`,
       async () => {
         setIsCheckout(true);
-        const popupRef = window.open('about:blank', '_blank');
-
         try {
           const batch = writeBatch(db);
           const ordiniColRef = collection(db, "ordini");
@@ -928,6 +926,7 @@ export default function App() {
               stato_pagamento: "In attesa",
               pagato: false,
               completato: false,
+              archiviato: false,
               utente_id: utenteLoggato.id,
               acquirente: `${utenteLoggato.nome || ''} ${utenteLoggato.cognome || ''}`.trim() || utenteLoggato.email,
               email_acquirente: utenteLoggato.email,
@@ -940,27 +939,17 @@ export default function App() {
           batch.update(userRef, { [campoCarrello]: [] });
           await batch.commit();
 
-          if (popupRef && !popupRef.closed) {
-            popupRef.location.href = linkPaypalConImporto;
-          } else {
-            const a = document.createElement('a');
-            a.href = linkPaypalConImporto;
-            a.target = '_blank';
-            a.rel = 'noopener noreferrer';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-          }
+          setMostraModalCarrello(false);
+          setMostraModalSuccessoOrdine(true);
         } catch (error) { 
-          if (popupRef && !popupRef.closed) popupRef.close();
           mostraMessaggio("Errore: " + error.message, "error"); 
         } finally { 
           setIsCheckout(false); 
         }
       },
-      "Procedi su PayPal"
+      "Conferma e Invia"
     );
-  }, [carrello, totaleCarrello, utenteLoggato, settoreAttivo, linkPaypalSettore, chiediConferma, mostraMessaggio]);
+  }, [carrello, totaleCarrello, utenteLoggato, settoreAttivo, chiediConferma, mostraMessaggio]);
 
   // EXCEL EXPORT BASATO SU SCALE DI TAGLIE.JS
   const generaFileXlsx = useCallback((ordiniDaElaborare) => {
@@ -987,9 +976,6 @@ export default function App() {
     const nomeSettoreTitolo = isNuoto ? 'NUOTO' : 'PALLANUOTO';
     const wb = XLSX.utils.book_new();
 
-    // ========================================================
-    // GERARCHIA ORDINAMENTO BASATA SU TAGLIE.JS
-    // ========================================================
     const sequenzaCanonicaTaglie = Array.from(new Set([
       ...TAGLIA_UNICA,
       ...TAGLIE_TSHIRT_UNISEX_COMPLETO.filter(t => t.toLowerCase().includes('junior')),
@@ -1019,7 +1005,6 @@ export default function App() {
       return a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
     };
 
-    // DEFINIZIONE BORDI NERI COMPLETI
     const blackBorders = {
       top: { style: "thin", color: { rgb: "000000" } },
       bottom: { style: "thin", color: { rgb: "000000" } },
@@ -1027,7 +1012,6 @@ export default function App() {
       right: { style: "thin", color: { rgb: "000000" } }
     };
 
-    // STILI GRAFICI PROFESSIONALI CON BORDI NERI
     const styleBanner = {
       font: { name: "Calibri", sz: 12, bold: true, color: { rgb: "FFFFFF" } },
       fill: { fgColor: { rgb: "001F54" } },
@@ -1075,15 +1059,10 @@ export default function App() {
       border: blackBorders
     };
 
-    // ========================================================
-    // FOGLIO 1: RIEPILOGO TAGLIE
-    // ========================================================
     const nomiProdottiUnivoci = Array.from(new Set(tuttiArticoli.map(a => a.nomeProdotto || "Capo")));
     const numCols1 = nomiProdottiUnivoci.length + 2;
 
     const tagliePresentiSet = new Set(tuttiArticoli.map(a => (a.taglia || "Taglia Unica").trim()));
-    
-    // Ordinamento taglie derivato direttamente dalla sequenza di taglie.js
     const elencoTaglieOrdinate = Array.from(tagliePresentiSet).sort(confrontaTaglie);
 
     const dataWs1 = [
@@ -1131,9 +1110,6 @@ export default function App() {
     ws1['!cols'] = [{ wch: 18 }, ...nomiProdottiUnivoci.map(() => ({ wch: 22 })), { wch: 14 }];
     XLSX.utils.book_append_sheet(wb, ws1, "Riepilogo Taglie");
 
-    // ========================================================
-    // FOGLIO 2: PERSONALIZZAZIONI RAGGRUPPATE PER ARTICOLO (SENZA NOME PROFILO)
-    // ========================================================
     const NUM_COLS_2 = 4;
     const dataWs2 = [
       [{ v: `CIRCOLO NUOTO LUCCA - ${nomeSettoreTitolo}`, s: styleBanner }, ...Array(NUM_COLS_2 - 1).fill({ v: "", s: styleBanner })]
@@ -1167,7 +1143,6 @@ export default function App() {
       let sezioneIndex = 1;
 
       gruppiPersonalizzatiPerArticolo.forEach((listaCapi, nomeArticolo) => {
-        // Capi ordinati per taglia e per numero di calotta crescente
         listaCapi.sort((a, b) => {
           const cmpTaglia = confrontaTaglie(a.taglia, b.taglia);
           if (cmpTaglia !== 0) return cmpTaglia;
@@ -1253,7 +1228,7 @@ export default function App() {
   const mandaInLavorazioneConEmail = useCallback(async (ordiniSelezionati) => {
     const daAggiornare = ordiniSelezionati && ordiniSelezionati.length > 0 
       ? ordiniSelezionati 
-      : tuttiGliOrdiniAdmin.filter(o => o.stato_pagamento === "In attesa");
+      : ordiniAttiviAdmin.filter(o => o.stato_pagamento === "In attesa");
 
     if (daAggiornare.length === 0) return;
 
@@ -1303,12 +1278,12 @@ ASD Circolo Nuoto Lucca`
     } finally {
       setInvioProduzioneInCorso(false);
     }
-  }, [tuttiGliOrdiniAdmin, settoreAttivo, generaFileXlsx, mostraMessaggio]);
+  }, [ordiniAttiviAdmin, settoreAttivo, generaFileXlsx, mostraMessaggio]);
 
   const impostaProntiRitiroAdmin = useCallback(async (ordiniSelezionati) => {
     const daAggiornare = ordiniSelezionati && ordiniSelezionati.length > 0
       ? ordiniSelezionati
-      : tuttiGliOrdiniAdmin.filter(o => o.stato_pagamento === "In lavorazione");
+      : ordiniAttiviAdmin.filter(o => o.stato_pagamento === "In lavorazione");
 
     if (daAggiornare.length === 0) return;
 
@@ -1332,22 +1307,85 @@ ASD Circolo Nuoto Lucca`
       console.error("Errore aggiornamento pronti al ritiro:", error);
       mostraMessaggio("Errore: " + error.message, "error");
     }
-  }, [tuttiGliOrdiniAdmin, mostraMessaggio]);
+  }, [ordiniAttiviAdmin, mostraMessaggio]);
 
   const esportaCsvAdmin = useCallback(() => {
     try {
-      if (tuttiGliOrdiniAdmin.length === 0) return;
-      const wb = generaFileXlsx(tuttiGliOrdiniAdmin);
+      if (ordiniAttiviAdmin.length === 0) return;
+      const wb = generaFileXlsx(ordiniAttiviAdmin);
       XLSX.writeFile(wb, `ORDINE_${settoreAttivo.toUpperCase()}_LUCCA.xlsx`);
       mostraMessaggio("Esportato", "File scaricato con successo.", "success");
     } catch (err) {
       mostraMessaggio("Errore: " + err.message, "error");
     }
+  }, [ordiniAttiviAdmin, settoreAttivo, generaFileXlsx, mostraMessaggio]);
+
+  const archiviaOrdineCorrenteAdmin = useCallback(async (titoloArchivio) => {
+    const daArchiviare = ordiniAttiviAdmin;
+    if (daArchiviare.length === 0) {
+      mostraMessaggio("Nessun Ordine", "Non ci sono ordini attivi da archiviare.", "warning");
+      return;
+    }
+
+    const nomeLotto = (titoloArchivio || `Ordine ${new Date().toLocaleDateString('it-IT')}`).trim();
+
+    try {
+      const batch = writeBatch(db);
+      const archivioRef = doc(collection(db, "archivio_ordini"));
+      const totaleValore = daArchiviare.reduce((acc, o) => acc + Number(o.prezzo || o.totale || 0), 0);
+      const totalePagato = daArchiviare.reduce((acc, o) => acc + (o.pagato ? Number(o.prezzo || o.totale || 0) : 0), 0);
+
+      batch.set(archivioRef, {
+        titolo: nomeLotto,
+        disciplina: settoreAttivo,
+        totale_capi: daArchiviare.length,
+        valore_totale: totaleValore,
+        incasso_saldato: totalePagato,
+        ordini_ids: daArchiviare.map(o => o.id),
+        data_archiviazione: serverTimestamp()
+      });
+
+      daArchiviare.forEach(ord => {
+        batch.update(doc(db, "ordini", ord.id), {
+          archiviato: true,
+          lotto_archivio: nomeLotto,
+          archiviato_il: serverTimestamp()
+        });
+      });
+
+      await batch.commit();
+      mostraMessaggio("Ordine Archiviato", `"${nomeLotto}" salvato nello storico. Ora puoi iniziare un nuovo ordine.`, "success");
+    } catch (err) {
+      console.error("Errore archiviazione:", err);
+      mostraMessaggio("Errore", "Impossibile archiviare l'ordine: " + err.message, "error");
+    }
+  }, [ordiniAttiviAdmin, settoreAttivo, mostraMessaggio]);
+
+  const esportaArchivioXlsxAdmin = useCallback((archivioDoc) => {
+    if (!archivioDoc) return;
+    const idsSet = new Set(archivioDoc.ordini_ids || []);
+    const ordiniDelLotto = tuttiGliOrdiniAdmin.filter(
+      o => idsSet.has(o.id) || (o.archiviato && o.lotto_archivio === archivioDoc.titolo)
+    );
+
+    if (ordiniDelLotto.length === 0) {
+      mostraMessaggio("Dati non trovati", "Nessun capo associato a questo archivio.", "warning");
+      return;
+    }
+
+    try {
+      const wb = generaFileXlsx(ordiniDelLotto);
+      const nomeSanitizzato = archivioDoc.titolo.replace(/[^a-zA-Z0-9_-]/g, '_');
+      XLSX.writeFile(wb, `ARCHIVIO_${nomeSanitizzato}_${settoreAttivo.toUpperCase()}.xlsx`);
+      mostraMessaggio("Esportato", `Excel "${archivioDoc.titolo}" scaricato.`, "success");
+    } catch (err) {
+      mostraMessaggio("Errore", "Impossibile esportare l'archivio: " + err.message, "error");
+    }
   }, [tuttiGliOrdiniAdmin, settoreAttivo, generaFileXlsx, mostraMessaggio]);
 
   const ordiniAdminRaggruppatiPerUtente = useMemo(() => {
     const gruppiMap = new Map();
-    tuttiGliOrdiniAdmin.forEach(ord => {
+    ordiniAttiviAdmin.forEach(ord => {
       const matchStato = filtroStatoAdmin === 'Tutti' || ord.stato_pagamento === filtroStatoAdmin;
       const termine = ricercaAdmin.toLowerCase().trim();
       const acquirenteStr = (ord.acquirente || '').toLowerCase();
@@ -1372,11 +1410,11 @@ ASD Circolo Nuoto Lucca`
       }
     });
     return Array.from(gruppiMap.values());
-  }, [tuttiGliOrdiniAdmin, ricercaAdmin, filtroStatoAdmin]);
+  }, [ordiniAttiviAdmin, ricercaAdmin, filtroStatoAdmin]);
 
   const ordiniInAttesaCount = useMemo(() => {
-    return tuttiGliOrdiniAdmin.filter(o => o.stato_pagamento === "In attesa").length;
-  }, [tuttiGliOrdiniAdmin]);
+    return ordiniAttiviAdmin.filter(o => o.stato_pagamento === "In attesa").length;
+  }, [ordiniAttiviAdmin]);
 
   const inizialiUtente = useMemo(() => {
     if (!utenteLoggato) return "CN";
@@ -1402,7 +1440,7 @@ ASD Circolo Nuoto Lucca`
     const clientiPronti = new Set();
     const clientiCompletati = new Set();
 
-    (tuttiGliOrdiniAdmin || []).forEach(o => {
+    (ordiniAttiviAdmin || []).forEach(o => {
       const email = o.email_acquirente || o.utente_id || 'anonimo';
       if (o.stato_pagamento === 'In attesa') clientiInAttesa.add(email);
       if (o.stato_pagamento === 'In lavorazione') clientiInLavorazione.add(email);
@@ -1422,13 +1460,12 @@ ASD Circolo Nuoto Lucca`
     stats.pronti = clientiPronti.size;
     stats.completati = clientiCompletati.size;
     return stats;
-  }, [tuttiGliOrdiniAdmin]);
+  }, [ordiniAttiviAdmin]);
 
   const haSollecitoAttivo = useMemo(() => {
     return notificheSettoreCorrente.some(n => n.tipo === 'sollecito' || Boolean(n.linkPaypal));
   }, [notificheSettoreCorrente]);
 
-  // LOGICA SOLLECITO CENTRALIZZATA & SINCRONIZZATA
   const calcolaDebitoTotaleUtente = useCallback(async (emailUtente, utenteId, settore) => {
     let tot = 0;
     const targetEmail = (emailUtente || '').toLowerCase().trim();
@@ -1711,7 +1748,6 @@ Circolo Nuoto Lucca`
     );
   }, [chiediConferma, mostraMessaggio]);
 
-  // CREAZIONE ORDINE DA PARTE DELL'ADMIN PER CONTO DI UN UTENTE
   const handleCreaOrdineAdminPerUtente = useCallback(async (datiOrdine) => {
     try {
       const {
@@ -1753,6 +1789,7 @@ Circolo Nuoto Lucca`
         stato_pagamento: "In attesa",
         pagato: Boolean(pagatoSubito),
         completato: false,
+        archiviato: false,
         utente_id: utenteId,
         acquirente: nomeAcquirente,
         email_acquirente: (emailAcquirente || "").toLowerCase().trim(),
@@ -1768,7 +1805,6 @@ Circolo Nuoto Lucca`
     }
   }, [settoreAttivo, mostraMessaggio]);
 
-  // MODIFICA PROFILO ATLETA DA PARTE DELL'ADMIN CON AGGIORNAMENTO A CASCATA
   const handleModificaProfiloDaAdmin = useCallback(async (utenteId, vecchioNome, nuoviDati) => {
     try {
       const isN = settoreAttivo === 'nuoto';
@@ -1787,7 +1823,6 @@ Circolo Nuoto Lucca`
       const listaVecchia = userData[campoAtleti] || (!isN ? (userData.atleti || []) : []);
       const nuovoNomeCompleto = `${nuoviDati.nome} ${nuoviDati.cognome}`.trim();
 
-      // 1. Aggiorna lista profili
       const listaAggiornata = listaVecchia.map(a => {
         const n = typeof a === 'object' ? `${a.nome || ''} ${a.cognome || ''}`.trim() : String(a).trim();
         if (n.toLowerCase() === vecchioNome.toLowerCase()) {
@@ -1800,7 +1835,6 @@ Circolo Nuoto Lucca`
         return a;
       });
 
-      // 2. Aggiorna eventuale carrello dell'utente su Firestore
       const carrelloVecchi = userData[campoCarrello] || (!isN ? (userData.carrello || []) : []);
       const carrelloAggiornato = (Array.isArray(carrelloVecchi) ? carrelloVecchi : []).map(item => {
         if ((item.atleta || '').toLowerCase() === vecchioNome.toLowerCase()) {
@@ -1819,7 +1853,6 @@ Circolo Nuoto Lucca`
         [campoCarrello]: carrelloAggiornato
       });
 
-      // 3. Trova e aggiorna tutti gli ordini associati all'utente e alla disciplina
       const qOrdini = query(
         collection(db, "ordini"),
         where("utente_id", "==", utenteId),
@@ -1866,7 +1899,6 @@ Circolo Nuoto Lucca`
     }
   }, [settoreAttivo, mostraMessaggio]);
 
-  // ELIMINAZIONE PROFILO DA PARTE DELL'ADMIN (CON CONTROLLO BACKEND)
   const handleEliminaProfiloDaAdmin = useCallback(async (utenteId, profiloDaEliminare) => {
     try {
       const isN = settoreAttivo === 'nuoto';
@@ -1883,7 +1915,6 @@ Circolo Nuoto Lucca`
       const listaAttuale = dati[campoAtleti] || (!isN ? (dati.atleti || []) : []);
       const nomeTarget = (profiloDaEliminare.nomeCompleto || `${profiloDaEliminare.nome || ''} ${profiloDaEliminare.cognome || ''}`).trim().toLowerCase();
 
-      // Verifica ordini pendenti sul database
       const qOrdini = query(
         collection(db, "ordini"),
         where("utente_id", "==", utenteId),
@@ -1926,7 +1957,6 @@ Circolo Nuoto Lucca`
     }
   }, [settoreAttivo, mostraMessaggio]);
 
-  // ELIMINAZIONE ACCOUNT DA PARTE DELL'ADMIN (CON CONTROLLO BACKEND)
   const handleEliminaAccountDaAdmin = useCallback(async (utenteId) => {
     try {
       const qOrdini = query(collection(db, "ordini"), where("utente_id", "==", utenteId));
@@ -1958,7 +1988,6 @@ Circolo Nuoto Lucca`
     }
   }, [mostraMessaggio]);
 
-  // AGGIUNTA PROFILO PER UN UTENTE DA PARTE DELL'ADMIN
   const handleAggiungiProfiloDaAdmin = useCallback(async (utenteId, nuovoProfilo) => {
     try {
       const campoAtleti = settoreAttivo === 'nuoto' ? "atleti_nuoto" : "atleti_pallanuoto";
@@ -1973,7 +2002,6 @@ Circolo Nuoto Lucca`
     }
   }, [settoreAttivo, mostraMessaggio]);
 
-  // MODIFICA NOMINATIVO ACCOUNT DA PARTE DELL'ADMIN A CASCATA
   const handleModificaAccountDaAdmin = useCallback(async (utenteId, datiAccount) => {
     try {
       const nuovoNomeCompleto = `${datiAccount.nome.trim()} ${datiAccount.cognome.trim()}`.trim();
@@ -1986,7 +2014,6 @@ Circolo Nuoto Lucca`
         aggiornato_il: serverTimestamp()
       });
 
-      // Aggiorna la dicitura acquirente in tutti gli ordini dell'utente
       const qOrdini = query(
         collection(db, "ordini"),
         where("utente_id", "==", utenteId)
@@ -2008,7 +2035,6 @@ Circolo Nuoto Lucca`
     }
   }, [mostraMessaggio]);
 
-  // ELIMINAZIONE CAPO DAL CARRELLO DI UN UTENTE SPECIFICO (SUPERADMIN)
   const handleRimuoviDalCarrelloUtenteDaAdmin = useCallback(async (utenteId, idUnivoco) => {
     try {
       const campoCarrello = settoreAttivo === 'nuoto' ? "carrello_nuoto" : "carrello_pallanuoto";
@@ -2035,7 +2061,6 @@ Circolo Nuoto Lucca`
     }
   }, [settoreAttivo, mostraMessaggio]);
 
-  // MODIFICA CAPO NEL CARRELLO DI UN UTENTE SPECIFICO (SUPERADMIN)
   const handleAggiornaCapoCarrelloUtenteDaAdmin = useCallback(async (utenteId, capoAggiornato) => {
     try {
       const campoCarrello = settoreAttivo === 'nuoto' ? "carrello_nuoto" : "carrello_pallanuoto";
@@ -2091,10 +2116,8 @@ Circolo Nuoto Lucca`
   return (
     <div className="min-h-screen font-sans text-slate-900 antialiased bg-slate-50/60 flex flex-col">
       
-      {/* Toast Notification in-app */}
       <ToastNotification toast={toast} onClose={() => setToast(null)} />
       
-      {/* Modali globali */}
       <CustomModal 
         modalConfig={modalConfig}
         onClose={() => setModalConfig(prev => ({ ...prev, isOpen: false }))}
@@ -2119,6 +2142,53 @@ Circolo Nuoto Lucca`
         isOpen={mostraGuidaPrimoAccesso}
         onClose={chiudiGuidaPrimoAccesso}
       />
+
+      {/* POPUP CONFERMA ORDINE E ISTRUZIONI DI PAGAMENTO */}
+      {mostraModalSuccessoOrdine && (
+        <div 
+          className="fixed inset-0 z-70 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm p-4 animate-in fade-in duration-150 overflow-y-auto"
+          onClick={() => setMostraModalSuccessoOrdine(false)}
+        >
+          <div 
+            className="relative w-full max-w-md bg-white rounded-3xl p-6 shadow-2xl space-y-4 my-auto border border-slate-200"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center text-lg shadow-2xs">
+                  <FontAwesomeIcon icon={faCircleCheck} />
+                </div>
+                <h3 className="text-base sm:text-lg font-black text-slate-900">Ordine Confermatissimo!</h3>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setMostraModalSuccessoOrdine(false)}
+                className="w-8 h-8 rounded-xl bg-slate-100 text-slate-500 hover:bg-slate-200 flex items-center justify-center text-xs cursor-pointer transition-colors"
+              >
+                <FontAwesomeIcon icon={faXmark} />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs sm:text-sm text-slate-600 font-semibold leading-relaxed">
+              <p>Il tuo ordine è stato confermato e inviato correttamente al sistema.</p>
+              <p>Adesso puoi procedere con il pagamento in qualsiasi momento cliccando sul tasto apposito <strong>"Da saldare: €..."</strong> presente nella barra superiore dell'applicazione.</p>
+              <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-2xl text-[#002b80] text-xs font-bold leading-relaxed">
+                ℹ️ <strong>Nota bene:</strong> Gli articoli e le relative personalizzazioni possono essere modificati fintanto che lo stato degli articoli risulta in <strong>"In attesa"</strong>, anche nel caso in cui l'ordine risulti già saldato.
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setMostraModalSuccessoOrdine(false)}
+                className="w-full h-12 rounded-2xl text-sm font-black bg-[#002b80] hover:bg-[#002060] text-white flex items-center justify-center cursor-pointer shadow-xs transition-all active:scale-[0.99]"
+              >
+                Ho capito, procedi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {mostraModalProfilo && (
         <ModalProfilo 
@@ -2157,34 +2227,23 @@ Circolo Nuoto Lucca`
         />
       )}
 
-      {/* MODALE DI SBLOCCO PASSWORD CONDIVISO SU FIREBASE */}
-      <ModalSbloccoUtenti 
-        isOpen={mostraModalSbloccoUtenti}
-        onClose={() => setMostraModalSbloccoUtenti(false)}
-        onSblocca={handleConfermaSbloccoUtenti}
-        utenteLoggato={utenteLoggato}
-        mostraMessaggio={mostraMessaggio}
-      />
-
-      {/* NAVBAR STICKY DIRETTA */}
       <Navbar 
         settoreUtente={settoreAttivo}
         onCambiaSettore={cambiaSettore}
-        mostraSelettoreSettore={!adminRuolo}
+        mostraSelettoreSettore={!adminRuolo || isSuperAdmin}
         sollecitiPerSettore={sollecitiPerSettore}
         carrelloCount={carrello.length}
         totaleCarrello={totaleCarrello}
         isUserAdmin={isUserAdminNelSettore}
+        isSuperAdmin={isSuperAdmin}
         inizialiUtente={inizialiUtente}
         adminTab={adminTab}
         onSetAdminTab={handleCambiaAdminTab}
-        sezioneUtentiSbloccata={sezioneUtentiSbloccata}
         onApriCarrello={() => setMostraModalCarrello(true)}
         onApriProfilo={() => setMostraModalProfilo(true)}
         onLogout={handleLogout}
       />
 
-      {/* MAIN CON PADDING NATURALE */}
       <main className="max-w-7xl w-full mx-auto px-3.5 sm:px-6 lg:px-8 pt-[calc(4.25rem+env(safe-area-inset-top,0px))] sm:pt-24 pb-8 flex-1">
         {!isUserAdminNelSettore ? (
           <>
@@ -2226,13 +2285,16 @@ Circolo Nuoto Lucca`
             filtroStato={filtroStatoAdmin}
             onSetFiltroStato={setFiltroStatoAdmin}
             ordiniRaggruppati={ordiniAdminRaggruppatiPerUtente}
-            tuttiGliOrdini={tuttiGliOrdiniAdmin}
+            tuttiGliOrdini={ordiniAttiviAdmin}
+            archivioOrdini={archivioOrdiniAdmin}
             tuttiGliUtenti={tuttiGliUtenti}
             ordiniInAttesaCount={ordiniInAttesaCount}
             invioProduzioneInCorso={invioProduzioneInCorso}
             onInviaProduzione={mandaInLavorazioneConEmail}
             onImpostaProntiRitiro={impostaProntiRitiroAdmin}
             onEsportaCsv={esportaCsvAdmin}
+            onArchiviaOrdineCorrente={archiviaOrdineCorrenteAdmin}
+            onEsportaArchivioXlsx={esportaArchivioXlsxAdmin}
             onAggiornaOrdine={handleAggiornaStatoOrdineAdmin}
             onToggleCompletatoArticolo={handleToggleCompletatoArticolo}
             onApriModificaOrdine={setOrdineInModifica}
