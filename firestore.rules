@@ -1,31 +1,126 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    
-    match /utenti/{userId} {
-      // 1. Consente la query di verifica email prima del login (Password dimenticata)
-      allow list: if request.auth != null || 
-        (resource.data.email != null && request.query.limit <= 1);
 
-      // 2. Lettura del singolo documento e scrittura riservate agli utenti autenticati
-      allow get: if request.auth != null;
-      allow write: if request.auth != null;
-      
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function hasUserDoc() {
+      return isSignedIn() && exists(/databases/$(database)/documents/utenti/$(request.auth.uid));
+    }
+
+    function getRole() {
+      return hasUserDoc()
+        ? get(/databases/$(database)/documents/utenti/$(request.auth.uid)).data.get('isAdmin', 'no')
+        : 'no';
+    }
+
+    function isSuperAdmin() {
+      return getRole() == 'superadmin';
+    }
+
+    function isAdminForSettore(disc) {
+      return isSuperAdmin() || (disc is string && getRole() == disc);
+    }
+
+    function isAnyStaff() {
+      return getRole() in ['pallanuoto', 'nuoto', 'superadmin'];
+    }
+
+    // --- UTENTI ---
+    match /utenti/{userId} {
+      // Lettura singolo doc o lista: solo il proprietario o lo staff/superadmin
+      allow get, list: if isSignedIn() && (request.auth.uid == userId || isAnyStaff());
+
+      // Registrazione: crea il proprio documento solo con isAdmin == 'no'
+      allow create: if isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.get('isAdmin', 'no') == 'no';
+
+      // Aggiornamento:
+      // - Utente normale: può aggiornare il proprio documento senza cambiare isAdmin o email
+      // - Staff / SuperAdmin: può aggiornare profili atleti e carrelli
+      allow update: if isSignedIn() && (
+        (
+          request.auth.uid == userId
+          && request.resource.data.get('isAdmin', 'no') == resource.data.get('isAdmin', 'no')
+          && request.resource.data.get('email', '') == resource.data.get('email', '')
+        )
+        || isAnyStaff()
+      );
+
+      // Eliminazione: solo il proprietario o staff/superadmin
+      allow delete: if isSignedIn() && (request.auth.uid == userId || isAnyStaff());
+
       // Sotto-collezione notifiche
       match /notifiche/{notifId} {
-        allow read, write: if request.auth != null;
+        allow read: if isSignedIn() && (request.auth.uid == userId || isAnyStaff());
+        allow create, update: if isSignedIn() && isAnyStaff();
+        allow delete: if isSignedIn() && (request.auth.uid == userId || isAnyStaff());
       }
     }
 
-    // Prodotti leggibili da chiunque (anche nel carosello di login), modificabili da autenticati
+    // --- PRODOTTI ---
+    // Lettura pubblica per permettere il carosello anche prima del login (Auth.jsx)
     match /prodotti/{prodottoId} {
       allow read: if true;
-      allow write: if request.auth != null;
+      allow create: if isSignedIn()
+        && isAdminForSettore(request.resource.data.get('disciplina', ''))
+        && request.resource.data.get('prezzo', 0) >= 0;
+      allow update: if isSignedIn()
+        && isAdminForSettore(resource.data.get('disciplina', ''))
+        && request.resource.data.get('prezzo', 0) >= 0;
+      allow delete: if isSignedIn()
+        && isAdminForSettore(resource.data.get('disciplina', ''));
     }
 
-    // Ordini gestibili da utenti autenticati
+    // --- ORDINI ---
     match /ordini/{ordineId} {
-      allow read, write: if request.auth != null;
+      allow read: if isSignedIn() && (
+        resource.data.get('utente_id', '') == request.auth.uid
+        || resource.data.get('email_acquirente', '') == request.auth.token.email
+        || isAdminForSettore(resource.data.get('disciplina', ''))
+      );
+
+      allow create: if isSignedIn() && (
+        (
+          request.resource.data.get('utente_id', '') == request.auth.uid
+          && request.resource.data.get('email_acquirente', '') == request.auth.token.email
+          && request.resource.data.get('pagato', false) == false
+          && request.resource.data.get('stato_pagamento', 'In attesa') == 'In attesa'
+          && request.resource.data.get('archiviato', false) == false
+          && request.resource.data.get('totale', 0) >= 0
+        )
+        || isAdminForSettore(request.resource.data.get('disciplina', ''))
+      );
+
+      allow update: if isSignedIn() && (
+        isAdminForSettore(resource.data.get('disciplina', ''))
+        || (
+          resource.data.get('utente_id', '') == request.auth.uid
+          && resource.data.get('stato_pagamento', '') == 'In attesa'
+          && request.resource.data.get('stato_pagamento', '') == 'In attesa'
+          && request.resource.data.get('pagato', false) == resource.data.get('pagato', false)
+          && request.resource.data.get('archiviato', false) == resource.data.get('archiviato', false)
+          && request.resource.data.get('totale', 0) >= 0
+        )
+      );
+
+      allow delete: if isSignedIn() && (
+        (resource.data.get('utente_id', '') == request.auth.uid && resource.data.get('stato_pagamento', '') == 'In attesa')
+        || isAdminForSettore(resource.data.get('disciplina', ''))
+      );
+    }
+
+    // --- ARCHIVIO ORDINI ---
+    match /archivio_ordini/{archivioId} {
+      allow read, create, update, delete: if isSignedIn()
+        && isAdminForSettore(
+          request.method == 'create'
+            ? request.resource.data.get('disciplina', '')
+            : resource.data.get('disciplina', '')
+        );
     }
   }
 }

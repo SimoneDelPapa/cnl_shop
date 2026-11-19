@@ -8,6 +8,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { db } from '../firebase';
 import { doc, getDoc } from 'firebase/firestore';
+import { getTaglieByScalaId } from '../utils/taglie';
 
 const TAGLIE_DEFAULT = ["4XS", "3XS", "2XS", "XS", "S", "M", "L", "XL", "2XL", "3XL"];
 const NUMERI = Array.from({ length: 15 }, (_, i) => String(i + 1));
@@ -27,7 +28,11 @@ export default function ModalModificaOrdine({
   }, [ordine]);
 
   const prodottoInfo = useMemo(() => {
-    return prodotti.find(p => p.nome === (articoloIniziale.nomeProdotto || ordine.nomeProdotto)) || null;
+    return prodotti.find(p =>
+      (articoloIniziale.prodottoId && p.id === articoloIniziale.prodottoId) ||
+      (p.nome && (articoloIniziale.nomeProdotto || ordine.nomeProdotto) &&
+        p.nome.trim().toLowerCase() === (articoloIniziale.nomeProdotto || ordine.nomeProdotto).trim().toLowerCase())
+    ) || null;
   }, [prodotti, articoloIniziale, ordine]);
 
   const isTagliaUnica = Boolean(prodottoInfo?.taglia_unica || articoloIniziale.taglia_unica);
@@ -35,11 +40,17 @@ export default function ModalModificaOrdine({
   const TAGLIE_DISPONIBILI = useMemo(() => {
     if (isTagliaUnica) return ["Taglia Unica"];
 
-    const lista = (Array.isArray(prodottoInfo?.taglie_disponibili) && prodottoInfo.taglie_disponibili.length > 0)
-      ? [...prodottoInfo.taglie_disponibili]
-      : (Array.isArray(articoloIniziale?.taglie_disponibili) && articoloIniziale.taglie_disponibili.length > 0)
-        ? [...articoloIniziale.taglie_disponibili]
-        : [...TAGLIE_DEFAULT];
+    let lista = [...TAGLIE_DEFAULT];
+    if (prodottoInfo?.scala_taglie_id) {
+      const daScala = getTaglieByScalaId(prodottoInfo.scala_taglie_id);
+      if (Array.isArray(daScala) && daScala.length > 0) {
+        lista = [...daScala];
+      }
+    } else if (Array.isArray(prodottoInfo?.taglie_disponibili) && prodottoInfo.taglie_disponibili.length > 0) {
+      lista = [...prodottoInfo.taglie_disponibili];
+    } else if (Array.isArray(articoloIniziale?.taglie_disponibili) && articoloIniziale.taglie_disponibili.length > 0) {
+      lista = [...articoloIniziale.taglie_disponibili];
+    }
 
     // Salvaguarda la taglia attualmente ordinata nel caso non rientrasse nel nuovo range
     const tagliaCorrente = articoloIniziale.taglia || ordine.taglia;
@@ -49,6 +60,16 @@ export default function ModalModificaOrdine({
 
     return lista;
   }, [prodottoInfo, articoloIniziale, ordine, isTagliaUnica]);
+
+  const { juniorTaglie, standardTaglie, haGruppi } = useMemo(() => {
+    const junior = TAGLIE_DISPONIBILI.filter(t => t.startsWith("Junior "));
+    const standard = TAGLIE_DISPONIBILI.filter(t => !t.startsWith("Junior ") && t !== "Taglia Unica");
+    return {
+      juniorTaglie: junior,
+      standardTaglie: standard,
+      haGruppi: junior.length > 0 && standard.length > 0
+    };
+  }, [TAGLIE_DISPONIBILI]);
 
   const [atletiDisponibili, setAtletiDisponibili] = useState(listaAtleti);
   const [atletaSelezionato, setAtletaSelezionato] = useState(
@@ -244,55 +265,24 @@ export default function ModalModificaOrdine({
                 onChange={e => setTagliaSelezionata(e.target.value)}
                 className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none focus:border-[#002b80] cursor-pointer"
               >
-                {(() => {
-                  const haJunior = TAGLIE_DISPONIBILI.some(t => t.startsWith("Junior "));
-                  const haDonna = TAGLIE_DISPONIBILI.some(t => t.startsWith("Donna "));
-                  const haSenior = TAGLIE_DISPONIBILI.some(t => t.startsWith("Senior "));
-                  const haUomo = TAGLIE_DISPONIBILI.some(t => t.startsWith("Uomo "));
-
-                  if (haJunior || haDonna || haSenior || haUomo) {
-                    return (
-                      <>
-                        {haJunior && (
-                          <optgroup label="JUNIOR">
-                            {TAGLIE_DISPONIBILI.filter(t => t.startsWith("Junior ")).map(t => (
-                              <option key={t} value={t}>{t.replace("Junior ", "")}</option>
-                            ))}
-                          </optgroup>
-                        )}
-                        {haDonna && (
-                          <optgroup label="DONNA">
-                            {TAGLIE_DISPONIBILI.filter(t => t.startsWith("Donna ")).map(t => (
-                              <option key={t} value={t}>{t.replace("Donna ", "")}</option>
-                            ))}
-                          </optgroup>
-                        )}
-                        {haSenior && (
-                          <optgroup label="SENIOR">
-                            {TAGLIE_DISPONIBILI.filter(t => t.startsWith("Senior ")).map(t => (
-                              <option key={t} value={t}>{t.replace("Senior ", "")}</option>
-                            ))}
-                          </optgroup>
-                        )}
-                        {haUomo && (
-                          <optgroup label="UOMO">
-                            {TAGLIE_DISPONIBILI.filter(t => t.startsWith("Uomo ")).map(t => (
-                              <option key={t} value={t}>{t.replace("Uomo ", "")}</option>
-                            ))}
-                          </optgroup>
-                        )}
-                        {/* Eventuali taglie custom o pregresse non prefissate */}
-                        {TAGLIE_DISPONIBILI.filter(t => !t.startsWith("Junior ") && !t.startsWith("Donna ") && !t.startsWith("Senior ") && !t.startsWith("Uomo ")).map(t => (
-                          <option key={t} value={t}>{t}</option>
-                        ))}
-                      </>
-                    );
-                  }
-
-                  return TAGLIE_DISPONIBILI.map(t => (
+                {haGruppi ? (
+                  <>
+                    <optgroup label="JUNIOR">
+                      {juniorTaglie.map(t => (
+                        <option key={t} value={t}>{t.replace("Junior ", "")}</option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="STANDARD">
+                      {standardTaglie.map(t => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </optgroup>
+                  </>
+                ) : (
+                  TAGLIE_DISPONIBILI.map(t => (
                     <option key={t} value={t}>{t}</option>
-                  ));
-                })()}
+                  ))
+                )}
               </select>
             )}
           </div>

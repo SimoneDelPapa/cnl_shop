@@ -1385,13 +1385,55 @@ ASD Circolo Nuoto Lucca`
 
   const ordiniAdminRaggruppatiPerUtente = useMemo(() => {
     const gruppiMap = new Map();
+    const termine = (ricercaAdmin || '').toLowerCase().trim();
+
+    const mappaProfiliPerChiave = new Map();
+    if (termine) {
+      (tuttiGliUtenti || []).forEach(u => {
+        const tuttiProfiliRaw = [
+          ...(Array.isArray(u.atleti_pallanuoto) ? u.atleti_pallanuoto : []),
+          ...(Array.isArray(u.atleti_nuoto) ? u.atleti_nuoto : []),
+          ...(Array.isArray(u.atleti) ? u.atleti : [])
+        ];
+        const testiProfili = tuttiProfiliRaw.map(p => {
+          if (typeof p === 'object' && p !== null) {
+            return `${p.nome || ''} ${p.cognome || ''} ${p.categoria || ''}`.toLowerCase();
+          }
+          return String(p).toLowerCase();
+        }).join(' ');
+
+        if (u.id) mappaProfiliPerChiave.set(`uid:${u.id}`, testiProfili);
+        if (u.email) mappaProfiliPerChiave.set(`email:${String(u.email).toLowerCase().trim()}`, testiProfili);
+      });
+    }
+
     ordiniAttiviAdmin.forEach(ord => {
       const matchStato = filtroStatoAdmin === 'Tutti' || ord.stato_pagamento === filtroStatoAdmin;
-      const termine = ricercaAdmin.toLowerCase().trim();
+      if (!matchStato) return;
+
       const acquirenteStr = (ord.acquirente || '').toLowerCase();
       const emailStr = (ord.email_acquirente || '').toLowerCase();
+      const uidStr = (ord.utente_id || '').toLowerCase();
 
-      if (matchStato && (!termine || acquirenteStr.includes(termine) || emailStr.includes(termine))) {
+      const listaCapi = Array.isArray(ord.articoli) && ord.articoli.length > 0 ? ord.articoli : [ord];
+      const infoProfiliOrdine = [
+        ord.atleta || '',
+        ord.categoria || '',
+        ...listaCapi.map(c => `${c.atleta || ''} ${c.categoria || ''}`)
+      ].join(' ').toLowerCase();
+
+      const infoProfiliAccount = (ord.utente_id && mappaProfiliPerChiave.get(`uid:${ord.utente_id}`))
+        || mappaProfiliPerChiave.get(`email:${emailStr}`)
+        || '';
+
+      const matchRicerca = !termine ||
+        acquirenteStr.includes(termine) ||
+        emailStr.includes(termine) ||
+        uidStr.includes(termine) ||
+        infoProfiliOrdine.includes(termine) ||
+        infoProfiliAccount.includes(termine);
+
+      if (matchRicerca) {
         const chiaveUtente = ord.email_acquirente || "Sconosciuta";
         if (!gruppiMap.has(chiaveUtente)) {
           gruppiMap.set(chiaveUtente, {
@@ -1410,7 +1452,7 @@ ASD Circolo Nuoto Lucca`
       }
     });
     return Array.from(gruppiMap.values());
-  }, [ordiniAttiviAdmin, ricercaAdmin, filtroStatoAdmin]);
+  }, [ordiniAttiviAdmin, ricercaAdmin, filtroStatoAdmin, tuttiGliUtenti]);
 
   const ordiniInAttesaCount = useMemo(() => {
     return ordiniAttiviAdmin.filter(o => o.stato_pagamento === "In attesa").length;
@@ -1636,18 +1678,21 @@ Circolo Nuoto Lucca`
         if (ordTarget?.articoli && ordTarget.articoli.length > 0) {
           payload.articoli = ordTarget.articoli.map(art => ({
             ...art,
-            completato: false
+            completato: false,
+            consegnato_il: null
           }));
         }
       }
 
       if (dataAggiornamento.stato_pagamento === "Completato") {
         payload.completato = true;
+        const oraConsegna = new Date().toISOString();
 
         if (ordTarget?.articoli && ordTarget.articoli.length > 0) {
           payload.articoli = ordTarget.articoli.map(art => ({
             ...art,
-            completato: true
+            completato: true,
+            consegnato_il: art.consegnato_il || oraConsegna
           }));
         }
       }
@@ -1679,7 +1724,12 @@ Circolo Nuoto Lucca`
       const articoliAggiornati = listaArticoli.map(art => {
         const matchUnivoco = (art.idUnivoco || ordTarget.id) === idUnivoco;
         if (matchUnivoco) {
-          return { ...art, completato: !art.completato };
+          const prossimoCompletato = !art.completato;
+          return { 
+            ...art, 
+            completato: prossimoCompletato,
+            consegnato_il: prossimoCompletato ? new Date().toISOString() : null
+          };
         }
         return art;
       });
@@ -1750,55 +1800,66 @@ Circolo Nuoto Lucca`
 
   const handleCreaOrdineAdminPerUtente = useCallback(async (datiOrdine) => {
     try {
-      const {
-        utenteId,
-        emailAcquirente,
-        nomeAcquirente,
-        atleta,
-        categoria,
-        prodotto,
-        taglia,
-        nomePersonalizzato,
-        numeroPersonalizzato,
-        colorePersonalizzato,
-        pagatoSubito
-      } = datiOrdine;
+      const listaDaCreare = Array.isArray(datiOrdine) ? datiOrdine : [datiOrdine];
+      if (listaDaCreare.length === 0) return;
 
-      const nuovoCapo = {
-        idUnivoco: `${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        prodottoId: prodotto.id,
-        nomeProdotto: prodotto.nome,
-        prezzo: Number(prodotto.prezzo || 0),
-        taglia: prodotto.taglia_unica ? "Taglia Unica" : taglia,
-        taglia_unica: Boolean(prodotto.taglia_unica),
-        atleta: (atleta || "Profilo Generale").trim(),
-        categoria: categoria || "Extra",
-        immagine_url: prodotto.immagine_url || null,
-        nomePersonalizzato: nomePersonalizzato ? nomePersonalizzato.trim().toUpperCase() : null,
-        numeroPersonalizzato: numeroPersonalizzato || null,
-        colorePersonalizzato: colorePersonalizzato || null
-      };
-
+      const batch = writeBatch(db);
       const ordiniColRef = collection(db, "ordini");
-      const newDocRef = doc(ordiniColRef);
 
-      await setDoc(newDocRef, {
-        ...nuovoCapo,
-        totale: nuovoCapo.prezzo,
-        disciplina: settoreAttivo,
-        stato_pagamento: "In attesa",
-        pagato: Boolean(pagatoSubito),
-        completato: false,
-        archiviato: false,
-        utente_id: utenteId,
-        acquirente: nomeAcquirente,
-        email_acquirente: (emailAcquirente || "").toLowerCase().trim(),
-        articoli: [nuovoCapo],
-        creato_da_admin: true,
-        creato_il: serverTimestamp()
+      listaDaCreare.forEach(itemOrdine => {
+        const {
+          utenteId,
+          emailAcquirente,
+          nomeAcquirente,
+          atleta,
+          categoria,
+          prodotto,
+          taglia,
+          nomePersonalizzato,
+          numeroPersonalizzato,
+          colorePersonalizzato,
+          pagatoSubito
+        } = itemOrdine;
+
+        const nuovoCapo = {
+          idUnivoco: `${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          prodottoId: prodotto.id,
+          nomeProdotto: prodotto.nome,
+          prezzo: Number(prodotto.prezzo || 0),
+          taglia: prodotto.taglia_unica ? "Taglia Unica" : taglia,
+          taglia_unica: Boolean(prodotto.taglia_unica),
+          atleta: (atleta || "Profilo Generale").trim(),
+          categoria: categoria || "Extra",
+          immagine_url: prodotto.immagine_url || null,
+          nomePersonalizzato: nomePersonalizzato ? nomePersonalizzato.trim().toUpperCase() : null,
+          numeroPersonalizzato: numeroPersonalizzato || null,
+          colorePersonalizzato: colorePersonalizzato || null
+        };
+
+        const newDocRef = doc(ordiniColRef);
+        batch.set(newDocRef, {
+          ...nuovoCapo,
+          totale: nuovoCapo.prezzo,
+          disciplina: settoreAttivo,
+          stato_pagamento: "In attesa",
+          pagato: Boolean(pagatoSubito),
+          completato: false,
+          archiviato: false,
+          utente_id: utenteId,
+          acquirente: nomeAcquirente,
+          email_acquirente: (emailAcquirente || "").toLowerCase().trim(),
+          articoli: [nuovoCapo],
+          creato_da_admin: true,
+          creato_il: serverTimestamp()
+        });
       });
 
-      mostraMessaggio("Ordine Creato", `Ordine creato con successo per ${atleta}.`, "success");
+      await batch.commit();
+      mostraMessaggio(
+        "Ordine Creato",
+        `${listaDaCreare.length} ${listaDaCreare.length === 1 ? 'capo aggiunto' : 'capi aggiunti'} con successo.`,
+        "success"
+      );
     } catch (err) {
       console.error("Errore creazione ordine admin:", err);
       mostraMessaggio("Errore", "Impossibile creare l'ordine: " + err.message, "error");
@@ -1810,7 +1871,7 @@ Circolo Nuoto Lucca`
       const isN = settoreAttivo === 'nuoto';
       const campoAtleti = isN ? "atleti_nuoto" : "atleti_pallanuoto";
       const campoCarrello = isN ? "carrello_nuoto" : "carrello_pallanuoto";
-      
+
       const userRef = doc(db, "utenti", utenteId);
       const userSnap = await getDoc(userRef);
 
@@ -1848,7 +1909,7 @@ Circolo Nuoto Lucca`
       });
 
       const batch = writeBatch(db);
-      batch.update(userRef, { 
+      batch.update(userRef, {
         [campoAtleti]: listaAggiornata,
         [campoCarrello]: carrelloAggiornato
       });
@@ -1865,7 +1926,7 @@ Circolo Nuoto Lucca`
         if (o.stato_pagamento === "Annullato") return;
 
         let modificato = false;
-        let articoliAgg = (o.articoli || []).map(art => {
+        const articoliAgg = (o.articoli || []).map(art => {
           if ((art.atleta || '').toLowerCase() === vecchioNome.toLowerCase()) {
             modificato = true;
             return {

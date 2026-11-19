@@ -10,8 +10,34 @@ import {
   faLock,
   faReceipt
 } from '@fortawesome/free-solid-svg-icons';
+import { getTaglieByScalaId } from '../utils/taglie';
 
 const NUMERI_CALOTTA = Array.from({ length: 15 }, (_, i) => i + 1);
+
+const risolviTaglieProdotto = (schedaCatalogo, item) => {
+  if (schedaCatalogo?.taglia_unica) {
+    return ["Taglia Unica"];
+  }
+  if (schedaCatalogo?.scala_taglie_id) {
+    const daScala = getTaglieByScalaId(schedaCatalogo.scala_taglie_id);
+    if (Array.isArray(daScala) && daScala.length > 0) {
+      return daScala;
+    }
+  }
+  if (item?.scala_taglie_id) {
+    const daItemScala = getTaglieByScalaId(item.scala_taglie_id);
+    if (Array.isArray(daItemScala) && daItemScala.length > 0) {
+      return daItemScala;
+    }
+  }
+  if (Array.isArray(schedaCatalogo?.taglie_disponibili) && schedaCatalogo.taglie_disponibili.length > 0) {
+    return schedaCatalogo.taglie_disponibili;
+  }
+  if (Array.isArray(item?.taglie_disponibili) && item.taglie_disponibili.length > 0) {
+    return item.taglie_disponibili;
+  }
+  return [item?.taglia || "Taglia Unica"];
+};
 
 export default function ModalCarrello({
   isOpen,
@@ -53,9 +79,19 @@ export default function ModalCarrello({
   };
 
   const apriModifica = (item) => {
-    const schedaCatalogo = prodotti.find(p => p.id === item.prodottoId || p.nome === item.nomeProdotto) || {};
+    const schedaCatalogo = prodotti.find(p =>
+      (item.prodottoId && p.id === item.prodottoId) ||
+      (p.nome && item.nomeProdotto && p.nome.trim().toLowerCase() === item.nomeProdotto.trim().toLowerCase())
+    ) || {};
+
+    const taglieAggiornate = risolviTaglieProdotto(schedaCatalogo, item);
+    const tagliaValida = taglieAggiornate.includes(item.taglia)
+      ? item.taglia
+      : (taglieAggiornate[0] || item.taglia);
+
     setItemInModifica({
       ...item,
+      taglia: tagliaValida,
       schedaCatalogo,
       nomePersonalizzato: item.nomePersonalizzato || '',
       numeroPersonalizzato: item.numeroPersonalizzato || '',
@@ -335,51 +371,34 @@ export default function ModalCarrello({
                     Taglia
                   </label>
                   {(() => {
-                    const taglieDisponibili = itemInModifica.schedaCatalogo?.taglie_disponibili || 
-                      itemInModifica.taglie_disponibili || 
-                      [itemInModifica.taglia];
+                    const taglieDisponibili = risolviTaglieProdotto(itemInModifica.schedaCatalogo, itemInModifica);
 
-                    const haJunior = taglieDisponibili.some(t => t.startsWith("Junior "));
-                    const haDonna = taglieDisponibili.some(t => t.startsWith("Donna "));
-                    const haSenior = taglieDisponibili.some(t => t.startsWith("Senior "));
-                    const haUomo = taglieDisponibili.some(t => t.startsWith("Uomo "));
+                    const juniorTaglie = taglieDisponibili.filter(t => t.startsWith("Junior "));
+                    const normaliTaglie = taglieDisponibili.filter(t => !t.startsWith("Junior ") && t !== "Taglia Unica");
+                    const haGruppi = juniorTaglie.length > 0 && normaliTaglie.length > 0;
+
+                    const valoreSelezionato = taglieDisponibili.includes(itemInModifica.taglia)
+                      ? itemInModifica.taglia
+                      : (taglieDisponibili[0] || '');
 
                     return (
                       <select
-                        value={itemInModifica.taglia || taglieDisponibili[0]}
+                        value={valoreSelezionato}
                         onChange={e => setItemInModifica({ ...itemInModifica, taglia: e.target.value })}
                         className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none focus:border-[#002b80] cursor-pointer"
                       >
-                        {haJunior || haDonna || haSenior || haUomo ? (
+                        {haGruppi ? (
                           <>
-                            {haJunior && (
-                              <optgroup label="JUNIOR">
-                                {taglieDisponibili.filter(t => t.startsWith("Junior ")).map(t => (
-                                  <option key={t} value={t}>{t.replace("Junior ", "")}</option>
-                                ))}
-                              </optgroup>
-                            )}
-                            {haDonna && (
-                              <optgroup label="DONNA">
-                                {taglieDisponibili.filter(t => t.startsWith("Donna ")).map(t => (
-                                  <option key={t} value={t}>{t.replace("Donna ", "")}</option>
-                                ))}
-                              </optgroup>
-                            )}
-                            {haSenior && (
-                              <optgroup label="SENIOR">
-                                {taglieDisponibili.filter(t => t.startsWith("Senior ")).map(t => (
-                                  <option key={t} value={t}>{t.replace("Senior ", "")}</option>
-                                ))}
-                              </optgroup>
-                            )}
-                            {haUomo && (
-                              <optgroup label="UOMO">
-                                {taglieDisponibili.filter(t => t.startsWith("Uomo ")).map(t => (
-                                  <option key={t} value={t}>{t.replace("Uomo ", "")}</option>
-                                ))}
-                              </optgroup>
-                            )}
+                            <optgroup label="JUNIOR">
+                              {juniorTaglie.map(t => (
+                                <option key={t} value={t}>{t.replace("Junior ", "")}</option>
+                              ))}
+                            </optgroup>
+                            <optgroup label="STANDARD">
+                              {normaliTaglie.map(t => (
+                                <option key={t} value={t}>{t}</option>
+                              ))}
+                            </optgroup>
                           </>
                         ) : (
                           taglieDisponibili.map(t => (
@@ -495,6 +514,7 @@ export default function ModalCarrello({
                 </div>
               )}
 
+              {/* PULSANTE SALVA MODIFICHE */}
               <div className="pt-3.5 mt-2 border-t border-slate-100 shrink-0">
                 <button
                   type="submit"

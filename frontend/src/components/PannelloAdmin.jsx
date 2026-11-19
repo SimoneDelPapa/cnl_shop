@@ -39,6 +39,8 @@ import {
 import { getOpzioniScaleSettore, getTaglieByScalaId } from '../utils/taglie';
 import ModalCreaOrdineAdmin from './ModalCreaOrdineAdmin';
 
+const NUMERI_CALOTTA = Array.from({ length: 15 }, (_, i) => i + 1);
+
 export default function PannelloAdmin({
   adminTab = 'ordini',
   statistiche = {
@@ -190,6 +192,50 @@ export default function PannelloAdmin({
     mostraModalStoricoArchivi
   ]);
 
+  const ordiniRaggruppatiFiltrati = useMemo(() => {
+    const q = (ricerca || '').toLowerCase().trim();
+    if (!q) return ordiniRaggruppati || [];
+
+    const mappaProfiliPerChiave = new Map();
+    (tuttiGliUtenti || []).forEach(u => {
+      const tuttiProfiliRaw = [
+        ...(Array.isArray(u.atleti_pallanuoto) ? u.atleti_pallanuoto : []),
+        ...(Array.isArray(u.atleti_nuoto) ? u.atleti_nuoto : []),
+        ...(Array.isArray(u.atleti) ? u.atleti : [])
+      ];
+      const testiProfili = tuttiProfiliRaw.map(p => {
+        if (typeof p === 'object' && p !== null) {
+          return `${p.nome || ''} ${p.cognome || ''} ${p.categoria || ''}`.toLowerCase();
+        }
+        return String(p).toLowerCase();
+      }).join(' ');
+
+      if (u.id) mappaProfiliPerChiave.set(`uid:${u.id}`, testiProfili);
+      if (u.email) mappaProfiliPerChiave.set(`email:${String(u.email).toLowerCase().trim()}`, testiProfili);
+    });
+
+    return (ordiniRaggruppati || []).filter(gruppo => {
+      const emailKey = `email:${String(gruppo.email || '').toLowerCase().trim()}`;
+      const primoOrdine = Array.isArray(gruppo.ordini) ? gruppo.ordini[0] : null;
+      const uidKey = primoOrdine?.utente_id ? `uid:${primoOrdine.utente_id}` : null;
+
+      const infoAccount = `${gruppo.acquirente || ''} ${gruppo.email || ''} ${primoOrdine?.utente_id || ''}`.toLowerCase();
+      const infoProfiliAccount = (uidKey && mappaProfiliPerChiave.get(uidKey)) || mappaProfiliPerChiave.get(emailKey) || '';
+
+      const infoProfiliOrdini = (gruppo.ordini || []).map(ord => {
+        const capi = Array.isArray(ord.articoli) && ord.articoli.length > 0 ? ord.articoli : [ord];
+        const testiCapi = capi.map(c => `${c.atleta || ''} ${c.categoria || ''}`).join(' ');
+        return `${ord.atleta || ''} ${ord.categoria || ''} ${testiCapi}`;
+      }).join(' ').toLowerCase();
+
+      return (
+        infoAccount.includes(q) ||
+        infoProfiliAccount.includes(q) ||
+        infoProfiliOrdini.includes(q)
+      );
+    });
+  }, [ordiniRaggruppati, ricerca, tuttiGliUtenti]);
+
   const ordiniInLavorazioneCount = useMemo(() => {
     return (tuttiGliOrdini || []).filter(o => o.stato_pagamento === "In lavorazione").length;
   }, [tuttiGliOrdini]);
@@ -289,12 +335,12 @@ export default function PannelloAdmin({
     });
   };
 
-  const tuttiEspansi = ordiniRaggruppati.length > 0 && utentiEspansi.size === ordiniRaggruppati.length;
+  const tuttiEspansi = ordiniRaggruppatiFiltrati.length > 0 && utentiEspansi.size === ordiniRaggruppatiFiltrati.length;
   const toggleTuttiOrdini = () => {
     if (tuttiEspansi) {
       setUtentiEspansi(new Set());
     } else {
-      setUtentiEspansi(new Set(ordiniRaggruppati.map(g => g.email)));
+      setUtentiEspansi(new Set(ordiniRaggruppatiFiltrati.map(g => g.email)));
     }
   };
 
@@ -363,6 +409,30 @@ export default function PannelloAdmin({
       }).format(date);
     } catch {
       return "Recente";
+    }
+  };
+
+  const formattaDataOraConsegna = (timestamp) => {
+    if (!timestamp) return null;
+    try {
+      let date;
+      if (typeof timestamp.toDate === 'function') date = timestamp.toDate();
+      else if (timestamp instanceof Date) date = timestamp;
+      else if (typeof timestamp === 'number' || typeof timestamp === 'string') date = new Date(timestamp);
+      else if (timestamp.seconds !== undefined) date = new Date(timestamp.seconds * 1000);
+      else return null;
+
+      if (isNaN(date.getTime())) return null;
+
+      const gg = String(date.getDate()).padStart(2, '0');
+      const mm = String(date.getMonth() + 1).padStart(2, '0');
+      const aaaa = date.getFullYear();
+      const hh = String(date.getHours()).padStart(2, '0');
+      const min = String(date.getMinutes()).padStart(2, '0');
+
+      return `${gg}/${mm}/${aaaa} - ${hh}:${min}`;
+    } catch {
+      return null;
     }
   };
 
@@ -546,23 +616,22 @@ export default function PannelloAdmin({
     );
   }, [listaAccountCompleta, ricercaUtentiTab]);
 
+  // Blocca l'eliminazione se esistono ordini non annullati e non ancora archiviati per il profilo
   const haOrdiniPendentiProfilo = (nomeProfilo, emailAccount) => {
     const pNome = (nomeProfilo || '').toLowerCase().trim();
     const pEmail = (emailAccount || '').toLowerCase().trim();
 
     return (tuttiGliOrdini || []).some(o => {
-      const matchEmail = (o.email_acquirente || '').toLowerCase().trim() === pEmail;
+      const matchEmail = pEmail && (o.email_acquirente || '').toLowerCase().trim() === pEmail;
       if (!matchEmail) return false;
-      if (o.stato_pagamento === "Annullato") return false;
+      if (o.stato_pagamento === "Annullato" || o.archiviato) return false;
 
       const lista = Array.isArray(o.articoli) && o.articoli.length > 0 ? o.articoli : [o];
-      const appartieneAProfilo = lista.some(c => (c.atleta || o.atleta || '').toLowerCase().trim() === pNome);
-      if (!appartieneAProfilo) return false;
-
-      return (o.stato_pagamento === "In attesa" || o.stato_pagamento === "In lavorazione" || !o.pagato);
+      return lista.some(c => (c.atleta || o.atleta || '').toLowerCase().trim() === pNome);
     });
   };
 
+  // Blocca l'eliminazione se esistono ordini non annullati e non ancora archiviati per l'account
   const haOrdiniPendentiAccount = (emailAccount, utenteId) => {
     const pEmail = (emailAccount || '').toLowerCase().trim();
 
@@ -570,9 +639,9 @@ export default function PannelloAdmin({
       const matchEmail = pEmail && (o.email_acquirente || '').toLowerCase().trim() === pEmail;
       const matchUid = utenteId && o.utente_id === utenteId;
       if (!matchEmail && !matchUid) return false;
-      if (o.stato_pagamento === "Annullato") return false;
+      if (o.stato_pagamento === "Annullato" || o.archiviato) return false;
 
-      return (o.stato_pagamento === "In attesa" || o.stato_pagamento === "In lavorazione" || !o.pagato);
+      return true;
     });
   };
 
@@ -598,7 +667,7 @@ export default function PannelloAdmin({
       if (mostraMessaggio) {
         mostraMessaggio(
           "Eliminazione non consentita",
-          `Impossibile eliminare il profilo "${prof.nomeCompleto}": risultano ordini pendenti, in lavorazione o non ancora saldati a suo nome.`,
+          `Impossibile eliminare il profilo "${prof.nomeCompleto}" finché risultano ordini non ancora archiviati a suo nome (il cliente deve poterli ancora visionare).`,
           "warning"
         );
       }
@@ -626,7 +695,7 @@ export default function PannelloAdmin({
       if (mostraMessaggio) {
         mostraMessaggio(
           "Eliminazione non consentita",
-          `Impossibile eliminare l'account "${account.nomeCompleto}": risultano ordini pendenti, in lavorazione o non ancora saldati.`,
+          `Impossibile eliminare l'account "${account.nomeCompleto}" finché risultano ordini non ancora archiviati (il cliente deve poterli ancora visionare).`,
           "warning"
         );
       }
@@ -699,22 +768,26 @@ export default function PannelloAdmin({
     setAccountInModifica(null);
   };
 
+  // Scheda catalogo associata al capo carrello attualmente in modifica
+  const prodottoCapoInModifica = useMemo(() => {
+    if (!capoCarrelloInModifica) return null;
+    return prodotti.find(p =>
+      (p.id && p.id === capoCarrelloInModifica.prodottoId) ||
+      (p.nome && p.nome.trim().toLowerCase() === (capoCarrelloInModifica.nomeProdotto || '').trim().toLowerCase())
+    ) || null;
+  }, [capoCarrelloInModifica, prodotti]);
+
   // Calcolo taglie disponibili per il capo carrello attualmente in modifica da taglie.js
   const taglieDisponibiliCapoInModifica = useMemo(() => {
     if (!capoCarrelloInModifica) return ["Taglia Unica"];
 
-    const prodTarget = prodotti.find(p => 
-      (p.id && p.id === capoCarrelloInModifica.prodottoId) ||
-      (p.nome && p.nome.trim().toLowerCase() === (capoCarrelloInModifica.nomeProdotto || '').trim().toLowerCase())
-    );
-
-    if (prodTarget) {
-      if (prodTarget.taglia_unica) return ["Taglia Unica"];
-      if (prodTarget.scala_taglie_id) {
-        return getTaglieByScalaId(prodTarget.scala_taglie_id);
+    if (prodottoCapoInModifica) {
+      if (prodottoCapoInModifica.taglia_unica) return ["Taglia Unica"];
+      if (prodottoCapoInModifica.scala_taglie_id) {
+        return getTaglieByScalaId(prodottoCapoInModifica.scala_taglie_id);
       }
-      if (Array.isArray(prodTarget.taglie_disponibili) && prodTarget.taglie_disponibili.length > 0) {
-        return prodTarget.taglie_disponibili;
+      if (Array.isArray(prodottoCapoInModifica.taglie_disponibili) && prodottoCapoInModifica.taglie_disponibili.length > 0) {
+        return prodottoCapoInModifica.taglie_disponibili;
       }
     }
 
@@ -746,7 +819,39 @@ export default function PannelloAdmin({
     }
 
     return scaleSettore[0]?.taglie || ["Taglia Unica"];
-  }, [capoCarrelloInModifica, prodotti, settoreUtente]);
+  }, [capoCarrelloInModifica, prodottoCapoInModifica, settoreUtente]);
+
+  const personalizzazioniCapoInModifica = useMemo(() => {
+    if (!capoCarrelloInModifica) {
+      return { haNome: false, haNumero: false, haColore: false };
+    }
+    const nomeLower = (capoCarrelloInModifica.nomeProdotto || '').toLowerCase();
+    return {
+      haNome: !isNuoto && Boolean(
+        prodottoCapoInModifica?.personalizzabile_nome ??
+        (capoCarrelloInModifica.nomePersonalizzato !== undefined && capoCarrelloInModifica.nomePersonalizzato !== null)
+      ),
+      haNumero: !isNuoto && Boolean(
+        prodottoCapoInModifica?.personalizzabile_numero ??
+        (capoCarrelloInModifica.numeroPersonalizzato !== undefined && capoCarrelloInModifica.numeroPersonalizzato !== null)
+      ),
+      haColore: !isNuoto && Boolean(
+        prodottoCapoInModifica?.personalizzabile_colore ??
+        (capoCarrelloInModifica.colorePersonalizzato !== undefined && capoCarrelloInModifica.colorePersonalizzato !== null && nomeLower.includes('calotta'))
+      )
+    };
+  }, [capoCarrelloInModifica, prodottoCapoInModifica, isNuoto]);
+
+  const categoriaCapoInModifica = useMemo(() => {
+    if (!capoCarrelloInModifica) return 'Extra';
+    if (capoCarrelloInModifica.categoria) return capoCarrelloInModifica.categoria;
+
+    const acc = listaAccountCompleta.find(u => u.id === capoCarrelloInModifica.utenteIdPadre);
+    const prof = acc?.profili?.find(
+      p => p.nomeCompleto.toLowerCase() === (capoCarrelloInModifica.atleta || '').toLowerCase().trim()
+    );
+    return prof?.categoria || 'Extra';
+  }, [capoCarrelloInModifica, listaAccountCompleta]);
 
   return (
     <div className="space-y-6">
@@ -965,9 +1070,9 @@ export default function PannelloAdmin({
           </div>
 
           {/* CONTATORE CLIENTI & ESPANSIONE SCHEDE */}
-          {ordiniRaggruppati.length > 0 && (
+          {ordiniRaggruppatiFiltrati.length > 0 && (
             <div className="flex items-center justify-between text-xs sm:text-sm text-slate-500 px-2 font-bold">
-              <span>{ordiniRaggruppati.length} {ordiniRaggruppati.length === 1 ? 'account cliente registrato' : 'account clienti registrati'}</span>
+              <span>{ordiniRaggruppatiFiltrati.length} {ordiniRaggruppatiFiltrati.length === 1 ? 'account cliente registrato' : 'account clienti registrati'}</span>
               <button 
                 type="button" 
                 onClick={toggleTuttiOrdini} 
@@ -980,14 +1085,22 @@ export default function PannelloAdmin({
 
           {/* LISTA ACCOUNT CLIENTI NEGLI ORDINI */}
           <div className="space-y-4">
-            {ordiniRaggruppati.length === 0 ? (
+            {ordiniRaggruppatiFiltrati.length === 0 ? (
               <div className="p-16 text-center bg-white border border-slate-200/80 rounded-3xl shadow-xs">
                 <p className="text-sm font-bold text-slate-400 italic">Nessun ordine attivo corrispondente ai criteri di ricerca.</p>
               </div>
             ) : (
-              ordiniRaggruppati.map((gruppo) => {
+              ordiniRaggruppatiFiltrati.map((gruppo) => {
                 const isEspanso = utentiEspansi.has(gruppo.email);
                 const haDebito = gruppo.totaleDovuto > 0;
+                const tuttiCapiConsegnati = Array.isArray(gruppo.ordini) && gruppo.ordini.length > 0 &&
+                  gruppo.ordini.every(ord => {
+                    if (ord.stato_pagamento === 'Completato' || Boolean(ord.completato)) return true;
+                    if (Array.isArray(ord.articoli) && ord.articoli.length > 0) {
+                      return ord.articoli.every(art => Boolean(art.completato));
+                    }
+                    return false;
+                  });
                 
                 const capiPerAtletaCliente = new Map();
                 gruppo.ordini.forEach(ord => {
@@ -1049,10 +1162,15 @@ export default function PannelloAdmin({
                               €{gruppo.totaleDovuto.toFixed(2)}
                             </span>
                           </div>
+                        ) : tuttiCapiConsegnati ? (
+                          <div className="bg-blue-50 border border-blue-200 px-4 py-2 rounded-2xl text-right">
+                            <span className="text-xs font-black uppercase tracking-wider text-[#002b80] block">Stato</span>
+                            <span className="text-xs sm:text-sm font-black text-[#002b80]">Completato</span>
+                          </div>
                         ) : (
                           <div className="bg-emerald-50 border border-emerald-200 px-4 py-2 rounded-2xl text-right">
                             <span className="text-xs font-black uppercase tracking-wider text-emerald-700 block">Stato</span>
-                            <span className="text-xs sm:text-sm font-black text-emerald-800">Tutto Saldato</span>
+                            <span className="text-xs sm:text-sm font-black text-emerald-800">Saldato</span>
                           </div>
                         )}
 
@@ -1411,6 +1529,7 @@ export default function PannelloAdmin({
                                     const statoReale = art.statoOrdine || "In attesa";
                                     const isSaldato = Boolean(art.pagato);
                                     const puoConsegnare = isConsegnato || (statoReale === "Pronto per il ritiro" && isSaldato);
+                                    const dataOraConsegna = formattaDataOraConsegna(art.consegnato_il || art.aggiornato_il);
 
                                     return (
                                       <div 
@@ -1490,30 +1609,38 @@ export default function PannelloAdmin({
                                             </span>
                                           </div>
 
-                                          <button
-                                            type="button"
-                                            disabled={!puoConsegnare}
-                                            onClick={() => onToggleCompletatoArticolo(art.idOrdine, art.idUnivoco)}
-                                            className={`w-full sm:w-auto h-9 px-4 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all whitespace-nowrap select-none shrink-0 ${
-                                              isConsegnato
-                                                ? 'bg-emerald-600 text-white shadow-2xs hover:bg-emerald-700 active:scale-[0.99] cursor-pointer'
-                                                : puoConsegnare
-                                                ? 'bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-2xs active:scale-[0.99] cursor-pointer'
-                                                : 'bg-slate-100 text-slate-400 border border-slate-200 opacity-60 cursor-not-allowed'
-                                            }`}
-                                            title={
-                                              isConsegnato
-                                                ? "Clicca per annullare la consegna e ripristinare 'Pronto per il ritiro'"
-                                                : !isSaldato
-                                                ? "Non consegnabile: l'articolo deve prima essere contrassegnato come saldato"
-                                                : statoReale !== "Pronto per il ritiro"
-                                                ? "Non consegnabile: l'articolo deve trovarsi nello stato 'Pronto per il ritiro'"
-                                                : "Conferma consegna a bordo vasca"
-                                            }
-                                          >
-                                            <FontAwesomeIcon icon={!puoConsegnare ? faLock : faCircleCheck} className="text-xs shrink-0" />
-                                            <span>{isConsegnato ? "Consegnato" : "Consegna"}</span>
-                                          </button>
+                                          <div className="flex flex-col items-stretch sm:items-end gap-1 w-full sm:w-auto shrink-0">
+                                            <button
+                                              type="button"
+                                              disabled={!puoConsegnare}
+                                              onClick={() => onToggleCompletatoArticolo(art.idOrdine, art.idUnivoco)}
+                                              className={`w-full sm:w-auto h-9 px-4 rounded-xl text-xs font-black flex items-center justify-center gap-2 transition-all whitespace-nowrap select-none ${
+                                                isConsegnato
+                                                  ? 'bg-emerald-600 text-white shadow-2xs hover:bg-emerald-700 active:scale-[0.99] cursor-pointer'
+                                                  : puoConsegnare
+                                                  ? 'bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 shadow-2xs active:scale-[0.99] cursor-pointer'
+                                                  : 'bg-slate-100 text-slate-400 border border-slate-200 opacity-60 cursor-not-allowed'
+                                              }`}
+                                              title={
+                                                isConsegnato
+                                                  ? "Clicca per annullare la consegna e ripristinare 'Pronto per il ritiro'"
+                                                  : !isSaldato
+                                                  ? "Non consegnabile: l'articolo deve prima essere contrassegnato come saldato"
+                                                  : statoReale !== "Pronto per il ritiro"
+                                                  ? "Non consegnabile: l'articolo deve trovarsi nello stato 'Pronto per il ritiro'"
+                                                  : "Conferma consegna a bordo vasca"
+                                              }
+                                            >
+                                              <FontAwesomeIcon icon={!puoConsegnare ? faLock : faCircleCheck} className="text-xs shrink-0" />
+                                              <span>{isConsegnato ? "Consegnato" : "Consegna"}</span>
+                                            </button>
+
+                                            {isConsegnato && dataOraConsegna && (
+                                              <span className="text-[10px] font-bold text-emerald-800/90 tabular-nums text-center sm:text-right leading-tight">
+                                                Consegnato: {dataOraConsegna}
+                                              </span>
+                                            )}
+                                          </div>
 
                                         </div>
 
@@ -1942,18 +2069,18 @@ export default function PannelloAdmin({
                         isAperto ? 'bg-slate-50/80 border-b border-slate-200/80' : 'hover:bg-slate-50/40'
                       }`}
                     >
-                      <div className="flex items-center gap-3 min-w-0">
+                      <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
                         <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-sm font-black shrink-0 transition-colors ${
                           isAperto ? 'bg-[#002b80] text-white shadow-2xs' : 'bg-slate-100 text-slate-600'
                         }`}>
                           <FontAwesomeIcon icon={isAperto ? faChevronUp : faChevronDown} />
                         </div>
-                        <div className="min-w-0">
+                        <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <h4 className="text-base sm:text-lg font-black text-slate-900 truncate">
+                            <h4 className="text-base sm:text-lg font-black text-slate-900 leading-snug break-words">
                               {account.nomeCompleto}
                             </h4>
-                            <span className="text-xs font-semibold text-slate-400 truncate">
+                            <span className="text-xs font-semibold text-slate-400 break-all">
                               ({account.email})
                             </span>
                           </div>
@@ -2025,7 +2152,7 @@ export default function PannelloAdmin({
 
                     {/* CORPO ESPANSO */}
                     {isAperto && (
-                      <div className="p-5 sm:p-6 space-y-5 bg-white animate-in slide-in-from-top-1 duration-150">
+                      <div className="p-4 sm:p-6 space-y-5 bg-white animate-in slide-in-from-top-1 duration-150">
                         
                         {/* SEZIONE 1: PROFILI REGISTRATI */}
                         <div>
@@ -2037,13 +2164,13 @@ export default function PannelloAdmin({
                             {account.profili.map((prof, pIdx) => (
                               <div 
                                 key={`acc-prof-${pIdx}`}
-                                className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3 flex items-center justify-between gap-2 hover:border-slate-300 transition-all"
+                                className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3 flex items-center justify-between gap-2.5 hover:border-slate-300 transition-all"
                               >
-                                <div className="min-w-0">
-                                  <span className="text-xs sm:text-sm font-black text-slate-900 truncate block">
+                                <div className="min-w-0 flex-1">
+                                  <span className="text-xs sm:text-sm font-black text-slate-900 leading-snug break-words block">
                                     {prof.nomeCompleto}
                                   </span>
-                                  <span className="text-[10px] font-bold text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded-md inline-block mt-0.5">
+                                  <span className="text-[10px] font-bold text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded-md inline-block mt-1">
                                     {prof.categoria}
                                   </span>
                                 </div>
@@ -2085,7 +2212,7 @@ export default function PannelloAdmin({
 
                         {/* SEZIONE 2: DETTAGLIO CAPI NEL CARRELLO ATTIVO */}
                         <div className="pt-4 border-t border-slate-100">
-                          <div className="flex items-center justify-between mb-2.5">
+                          <div className="flex items-center justify-between gap-2 flex-wrap mb-2.5">
                             <div className="flex items-center gap-2">
                               <FontAwesomeIcon icon={faCartShopping} className="text-xs text-[#002b80]" />
                               <span className="text-[10px] font-black uppercase tracking-wider text-slate-700">
@@ -2102,97 +2229,108 @@ export default function PannelloAdmin({
                           {account.carrello.length === 0 ? (
                             <p className="text-xs text-slate-400 italic">Il carrello di questo utente è vuoto.</p>
                           ) : (
-                            <div className="space-y-2">
-                              {account.carrello.map((capo, cIdx) => (
-                                <div 
-                                  key={`cart-item-${account.id}-${cIdx}`}
-                                  className="p-3 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-center justify-between gap-3 hover:border-slate-300 transition-colors"
-                                >
-                                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                                    {capo.immagine_url ? (
-                                      <div 
-                                        onClick={() => onZoomFoto && onZoomFoto(capo.immagine_url, capo.nomeProdotto)}
-                                        className="w-11 h-11 rounded-xl bg-white border border-slate-200 p-0.5 flex items-center justify-center shrink-0 cursor-zoom-in"
-                                        title="Ingrandisci foto"
-                                      >
-                                        <img src={capo.immagine_url} alt="" className="w-full h-full object-contain" />
-                                      </div>
-                                    ) : (
-                                      <div className="w-11 h-11 rounded-xl bg-white border border-slate-200 text-slate-300 flex items-center justify-center shrink-0 text-sm">
-                                        <FontAwesomeIcon icon={faShirt} />
-                                      </div>
-                                    )}
-                                    <div className="min-w-0 flex-1">
-                                      <div className="flex items-center gap-2 flex-wrap">
-                                        <span className="text-xs sm:text-sm font-black text-slate-900 truncate">
-                                          {capo.nomeProdotto}
-                                        </span>
-                                        <span className="text-[10px] font-black uppercase text-slate-600 bg-white border border-slate-200 px-2 py-0.5 rounded">
-                                          Taglia: {capo.taglia}
-                                        </span>
-                                      </div>
-                                      <span className="text-[11px] font-bold text-slate-500 block mt-0.5 truncate">
-                                        Intestato a: <strong className="text-slate-800">{capo.atleta || 'Profilo'}</strong>
-                                      </span>
-                                      {(capo.nomePersonalizzato || capo.numeroPersonalizzato || capo.colorePersonalizzato) && (
-                                        <div className="flex items-center gap-1 mt-1 flex-wrap">
-                                          {capo.nomePersonalizzato && (
-                                            <span className="text-[9px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">
-                                              "{capo.nomePersonalizzato}"
-                                            </span>
-                                          )}
-                                          {capo.numeroPersonalizzato && (
-                                            <span className="text-[9px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">
-                                              N° {capo.numeroPersonalizzato}
-                                            </span>
-                                          )}
-                                          {capo.colorePersonalizzato && (
-                                            <span className="text-[9px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded">
-                                              {capo.colorePersonalizzato}
-                                            </span>
-                                          )}
+                            <div className="space-y-2.5">
+                              {account.carrello.map((capo, cIdx) => {
+                                const etichettaTaglia = capo.taglia && String(capo.taglia).startsWith("Junior ")
+                                  ? `JUNIOR ${String(capo.taglia).replace("Junior ", "")}`
+                                  : (capo.taglia || "Taglia Unica");
+
+                                return (
+                                  <div 
+                                    key={`cart-item-${account.id}-${cIdx}`}
+                                    className="p-3.5 sm:p-4 bg-slate-50 border border-slate-200/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-slate-300 transition-colors"
+                                  >
+                                    <div className="flex items-start gap-3 min-w-0 flex-1">
+                                      {capo.immagine_url ? (
+                                        <div 
+                                          onClick={() => onZoomFoto && onZoomFoto(capo.immagine_url, capo.nomeProdotto)}
+                                          className="w-12 h-12 rounded-xl bg-white border border-slate-200 p-0.5 flex items-center justify-center shrink-0 cursor-zoom-in"
+                                          title="Ingrandisci foto"
+                                        >
+                                          <img src={capo.immagine_url} alt="" className="w-full h-full object-contain" />
+                                        </div>
+                                      ) : (
+                                        <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 text-slate-300 flex items-center justify-center shrink-0 text-sm">
+                                          <FontAwesomeIcon icon={faShirt} />
                                         </div>
                                       )}
+
+                                      <div className="min-w-0 flex-1 space-y-1">
+                                        <div className="flex items-center gap-2 flex-wrap">
+                                          <span className="text-xs sm:text-sm font-black text-slate-900 leading-snug break-words">
+                                            {capo.nomeProdotto}
+                                          </span>
+                                          <span className="text-[10px] font-black uppercase text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded-md whitespace-nowrap">
+                                            Taglia: {etichettaTaglia}
+                                          </span>
+                                        </div>
+
+                                        <p className="text-xs font-semibold text-slate-500 leading-snug break-words">
+                                          Intestato a: <strong className="text-slate-800 font-bold">{capo.atleta || 'Profilo'}</strong>
+                                        </p>
+
+                                        {(capo.nomePersonalizzato || capo.numeroPersonalizzato || capo.colorePersonalizzato) && (
+                                          <div className="flex items-center gap-1.5 pt-0.5 flex-wrap">
+                                            {capo.nomePersonalizzato && (
+                                              <span className="text-[10px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
+                                                "{capo.nomePersonalizzato}"
+                                              </span>
+                                            )}
+                                            {capo.numeroPersonalizzato && (
+                                              <span className="text-[10px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
+                                                N° {capo.numeroPersonalizzato}
+                                              </span>
+                                            )}
+                                            {capo.colorePersonalizzato && (
+                                              <span className="text-[10px] font-black text-[#002b80] bg-blue-50 border border-blue-200 px-2 py-0.5 rounded-md">
+                                                {capo.colorePersonalizzato}
+                                              </span>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    {/* PREZZO E AZIONI ICONICHE MODIFICA ED ELIMINAZIONE */}
+                                    <div className="flex items-center justify-between sm:justify-end gap-2.5 pt-2.5 sm:pt-0 border-t sm:border-t-0 border-slate-200/70 shrink-0">
+                                      <span className="text-sm font-black text-[#002b80] tabular-nums">
+                                        €{Number(capo.prezzo || 0).toFixed(2)}
+                                      </span>
+
+                                      <div className="flex items-center gap-2">
+                                        {/* PULSANTE MODIFICA CAPO CARRELLO (SOLO ICONA) */}
+                                        <button
+                                          type="button"
+                                          onClick={() => setCapoCarrelloInModifica({ ...capo, utenteIdPadre: account.id })}
+                                          className="w-8 h-8 rounded-xl bg-white hover:bg-blue-50 text-[#002b80] border border-blue-200 flex items-center justify-center text-xs transition-all shadow-2xs active:scale-95 cursor-pointer"
+                                          title="Modifica articolo nel carrello"
+                                        >
+                                          <FontAwesomeIcon icon={faPenToSquare} />
+                                        </button>
+
+                                        {/* PULSANTE ELIMINA CAPO CARRELLO (SOLO ICONA) */}
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            if (chiediConferma) {
+                                              chiediConferma(
+                                                "Rimuovi dal Carrello",
+                                                `Confermi la rimozione dell'articolo "${capo.nomeProdotto}" (${capo.atleta || 'Profilo'}) dal carrello di ${account.nomeCompleto}?`,
+                                                () => onRimuoviCapoCarrelloUtente && onRimuoviCapoCarrelloUtente(account.id, capo.idUnivoco),
+                                                "Rimuovi Capo"
+                                              );
+                                            }
+                                          }}
+                                          className="w-8 h-8 rounded-xl bg-white hover:bg-red-50 text-red-600 border border-red-200 flex items-center justify-center text-xs transition-all shadow-2xs active:scale-95 cursor-pointer"
+                                          title="Rimuovi dal carrello"
+                                        >
+                                          <FontAwesomeIcon icon={faTrashCan} />
+                                        </button>
+                                      </div>
                                     </div>
                                   </div>
-
-                                  {/* PREZZO E AZIONI ICONICHE MODIFICA ED ELIMINAZIONE */}
-                                  <div className="flex items-center gap-2.5 shrink-0">
-                                    <span className="text-xs sm:text-sm font-black text-[#002b80] tabular-nums pr-1">
-                                      €{Number(capo.prezzo || 0).toFixed(2)}
-                                    </span>
-
-                                    {/* PULSANTE MODIFICA CAPO CARRELLO (SOLO ICONA) */}
-                                    <button
-                                      type="button"
-                                      onClick={() => setCapoCarrelloInModifica({ ...capo, utenteIdPadre: account.id })}
-                                      className="w-8 h-8 rounded-xl bg-white hover:bg-blue-50 text-[#002b80] border border-blue-200 flex items-center justify-center text-xs transition-all shadow-2xs active:scale-95 cursor-pointer"
-                                      title="Modifica articolo nel carrello"
-                                    >
-                                      <FontAwesomeIcon icon={faPenToSquare} />
-                                    </button>
-
-                                    {/* PULSANTE ELIMINA CAPO CARRELLO (SOLO ICONA) */}
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (chiediConferma) {
-                                          chiediConferma(
-                                            "Rimuovi dal Carrello",
-                                            `Confermi la rimozione dell'articolo "${capo.nomeProdotto}" (${capo.atleta || 'Profilo'}) dal carrello di ${account.nomeCompleto}?`,
-                                            () => onRimuoviCapoCarrelloUtente && onRimuoviCapoCarrelloUtente(account.id, capo.idUnivoco),
-                                            "Rimuovi Capo"
-                                          );
-                                        }
-                                      }}
-                                      className="w-8 h-8 rounded-xl bg-white hover:bg-red-50 text-red-600 border border-red-200 flex items-center justify-center text-xs transition-all shadow-2xs active:scale-95 cursor-pointer"
-                                      title="Rimuovi dal carrello"
-                                    >
-                                      <FontAwesomeIcon icon={faTrashCan} />
-                                    </button>
-                                  </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           )}
                         </div>
@@ -2762,106 +2900,220 @@ export default function PannelloAdmin({
               </button>
             </div>
 
-            <form 
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (onModificaCapoCarrelloUtente) {
-                  onModificaCapoCarrelloUtente(capoCarrelloInModifica.utenteIdPadre, capoCarrelloInModifica);
-                }
-                setCapoCarrelloInModifica(null);
-              }}
-              className="space-y-3.5 flex-1 overflow-y-auto pr-1"
-            >
-              <div>
-                <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">
-                  Articolo
-                </label>
-                <input 
-                  type="text" 
-                  disabled 
-                  value={capoCarrelloInModifica.nomeProdotto} 
-                  className="w-full h-11 bg-slate-100 border border-slate-200 rounded-xl px-3.5 text-xs sm:text-sm font-bold text-slate-600 cursor-not-allowed"
-                />
-              </div>
+            {(() => {
+              const { haNome, haNumero, haColore } = personalizzazioniCapoInModifica;
+              const rawNum = capoCarrelloInModifica.numeroPersonalizzato ?? '';
+              const numInt = parseInt(rawNum, 10);
+              const haNumValido = !isNaN(numInt) && String(rawNum) !== '';
+              const isU14oU18 = categoriaCapoInModifica === 'U14' || categoriaCapoInModifica === 'U18';
 
-              {/* SELEZIONE TAGLIA DA TAGLIE.JS */}
-              <div>
-                <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">
-                  Taglia
-                </label>
-                {taglieDisponibiliCapoInModifica.length === 1 && taglieDisponibiliCapoInModifica[0] === "Taglia Unica" ? (
-                  <input 
-                    type="text"
-                    disabled
-                    value="Taglia Unica"
-                    className="w-full h-11 bg-slate-100 border border-slate-200 rounded-xl px-3.5 text-xs sm:text-sm font-bold text-slate-600 cursor-not-allowed"
-                  />
-                ) : (
-                  <select
-                    value={capoCarrelloInModifica.taglia}
-                    onChange={e => setCapoCarrelloInModifica({ ...capoCarrelloInModifica, taglia: e.target.value })}
-                    className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none focus:border-[#002b80] cursor-pointer"
-                  >
-                    {taglieDisponibiliCapoInModifica.map(t => (
-                      <option key={t} value={t}>{t}</option>
-                    ))}
-                  </select>
-                )}
-              </div>
+              const isPortiereRossoObbligatorio = haNumValido && (numInt === 1 || (numInt === 13 && !isU14oU18));
+              const isRossoConsentito = !haNumValido || isPortiereRossoObbligatorio || (numInt === 13 && isU14oU18);
+              const coloriDisponibili = isPortiereRossoObbligatorio
+                ? ['ROSSA']
+                : (isRossoConsentito ? ['BIANCA', 'NERA', 'ROSSA'] : ['BIANCA', 'NERA']);
 
-              {capoCarrelloInModifica.nomePersonalizzato !== undefined && capoCarrelloInModifica.nomePersonalizzato !== null && (
-                <div>
-                  <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">
-                    Nome Stampato
-                  </label>
-                  <input 
-                    type="text" 
-                    value={capoCarrelloInModifica.nomePersonalizzato || ''} 
-                    onChange={e => setCapoCarrelloInModifica({ ...capoCarrelloInModifica, nomePersonalizzato: e.target.value.toUpperCase() })}
-                    className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3.5 text-xs sm:text-sm font-bold text-slate-900 focus:outline-none focus:border-[#002b80]"
-                  />
-                </div>
-              )}
+              const coloreAttuale = isPortiereRossoObbligatorio
+                ? 'ROSSA'
+                : (coloriDisponibili.includes(capoCarrelloInModifica.colorePersonalizzato)
+                    ? capoCarrelloInModifica.colorePersonalizzato
+                    : 'BIANCA');
 
-              {capoCarrelloInModifica.numeroPersonalizzato !== undefined && capoCarrelloInModifica.numeroPersonalizzato !== null && (
-                <div>
-                  <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">
-                    Numero Calotta
-                  </label>
-                  <input 
-                    type="text" 
-                    value={capoCarrelloInModifica.numeroPersonalizzato || ''} 
-                    onChange={e => setCapoCarrelloInModifica({ ...capoCarrelloInModifica, numeroPersonalizzato: e.target.value })}
-                    className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3.5 text-xs sm:text-sm font-bold text-slate-900 focus:outline-none focus:border-[#002b80]"
-                  />
-                </div>
-              )}
+              return (
+                <form 
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (!onModificaCapoCarrelloUtente) {
+                      setCapoCarrelloInModifica(null);
+                      return;
+                    }
 
-              {capoCarrelloInModifica.colorePersonalizzato !== undefined && capoCarrelloInModifica.colorePersonalizzato !== null && (
-                <div>
-                  <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">
-                    Colore Calotta
-                  </label>
-                  <select 
-                    value={capoCarrelloInModifica.colorePersonalizzato || 'BIANCA'} 
-                    onChange={e => setCapoCarrelloInModifica({ ...capoCarrelloInModifica, colorePersonalizzato: e.target.value })}
-                    className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none focus:border-[#002b80] cursor-pointer"
-                  >
-                    <option value="BIANCA">BIANCA</option>
-                    <option value="BLU">BLU</option>
-                  </select>
-                </div>
-              )}
+                    let coloreEffettivo = capoCarrelloInModifica.colorePersonalizzato || 'BIANCA';
+                    if (isPortiereRossoObbligatorio) coloreEffettivo = 'ROSSA';
+                    else if (!isRossoConsentito && coloreEffettivo === 'ROSSA') coloreEffettivo = 'BIANCA';
 
-              <div className="pt-2">
-                <button
-                  type="submit"
-                  className="w-full h-12 bg-[#002b80] hover:bg-[#002060] active:scale-[0.99] text-white font-black rounded-2xl text-xs sm:text-sm uppercase tracking-wider transition-all shadow-md flex items-center justify-center cursor-pointer"
+                    const capoAggiornato = {
+                      ...capoCarrelloInModifica,
+                      nomePersonalizzato: haNome
+                        ? (capoCarrelloInModifica.nomePersonalizzato?.trim()
+                            ? capoCarrelloInModifica.nomePersonalizzato.trim().toUpperCase().slice(0, 15)
+                            : null)
+                        : null,
+                      numeroPersonalizzato: haNumero && String(capoCarrelloInModifica.numeroPersonalizzato ?? '') !== ''
+                        ? String(capoCarrelloInModifica.numeroPersonalizzato)
+                        : null,
+                      colorePersonalizzato: haColore ? coloreEffettivo : null
+                    };
+
+                    onModificaCapoCarrelloUtente(capoCarrelloInModifica.utenteIdPadre, capoAggiornato);
+                    setCapoCarrelloInModifica(null);
+                  }}
+                  className="space-y-3.5 flex-1 overflow-y-auto pr-1"
                 >
-                  Salva Modifiche Capo
-                </button>
-              </div>
-            </form>
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">
+                      Articolo
+                    </label>
+                    <input 
+                      type="text" 
+                      disabled 
+                      value={capoCarrelloInModifica.nomeProdotto} 
+                      className="w-full h-11 bg-slate-100 border border-slate-200 rounded-xl px-3.5 text-xs sm:text-sm font-bold text-slate-600 cursor-not-allowed"
+                    />
+                  </div>
+
+                  {/* SELEZIONE TAGLIA DA TAGLIE.JS */}
+                  <div>
+                    <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">
+                      Taglia
+                    </label>
+                    {taglieDisponibiliCapoInModifica.length === 1 && taglieDisponibiliCapoInModifica[0] === "Taglia Unica" ? (
+                      <input 
+                        type="text"
+                        disabled
+                        value="Taglia Unica"
+                        className="w-full h-11 bg-slate-100 border border-slate-200 rounded-xl px-3.5 text-xs sm:text-sm font-bold text-slate-600 cursor-not-allowed"
+                      />
+                    ) : (() => {
+                      const juniorCapo = taglieDisponibiliCapoInModifica.filter(t => t.startsWith("Junior "));
+                      const standardCapo = taglieDisponibiliCapoInModifica.filter(t => !t.startsWith("Junior ") && t !== "Taglia Unica");
+                      const haGruppiCapo = juniorCapo.length > 0 && standardCapo.length > 0;
+
+                      return (
+                        <select
+                          value={capoCarrelloInModifica.taglia}
+                          onChange={e => setCapoCarrelloInModifica({ ...capoCarrelloInModifica, taglia: e.target.value })}
+                          className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none focus:border-[#002b80] cursor-pointer"
+                        >
+                          {haGruppiCapo ? (
+                            <>
+                              <optgroup label="JUNIOR">
+                                {juniorCapo.map(t => (
+                                  <option key={t} value={t}>{t.replace("Junior ", "")}</option>
+                                ))}
+                              </optgroup>
+                              <optgroup label="STANDARD">
+                                {standardCapo.map(t => (
+                                  <option key={t} value={t}>{t}</option>
+                                ))}
+                              </optgroup>
+                            </>
+                          ) : (
+                            taglieDisponibiliCapoInModifica.map(t => (
+                              <option key={t} value={t}>{t}</option>
+                            ))
+                          )}
+                        </select>
+                      );
+                    })()}
+                  </div>
+
+                  {/* PERSONALIZZAZIONI ARTICOLO */}
+                  {(haNome || haNumero || haColore) && (
+                    <div className="pt-2 border-t border-slate-100 space-y-2.5">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-600 block">
+                        Personalizzazioni Articolo
+                      </span>
+
+                      {haNome && (
+                        <div className="relative">
+                          <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">
+                            Nome Stampato
+                          </label>
+                          <input 
+                            type="text" 
+                            maxLength={15}
+                            placeholder="NOME STAMPATO (MAX 15)"
+                            value={capoCarrelloInModifica.nomePersonalizzato || ''} 
+                            onChange={e => setCapoCarrelloInModifica({ ...capoCarrelloInModifica, nomePersonalizzato: e.target.value.toUpperCase() })}
+                            className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl pl-3.5 pr-12 text-xs sm:text-sm font-black uppercase tracking-wider text-slate-900 focus:outline-none focus:border-[#002b80]"
+                          />
+                          <span className="absolute right-3.5 bottom-3 text-[10px] font-bold text-slate-400 pointer-events-none">
+                            {(capoCarrelloInModifica.nomePersonalizzato || '').length}/15
+                          </span>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-2 gap-2">
+                        {haNumero && (
+                          <div>
+                            <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">
+                              Numero Calotta
+                            </label>
+                            <select 
+                              value={String(rawNum)} 
+                              onChange={e => {
+                                const n = e.target.value;
+                                const parsed = parseInt(n, 10);
+                                const valido = !isNaN(parsed) && n !== '';
+                                let col = capoCarrelloInModifica.colorePersonalizzato || 'BIANCA';
+
+                                if (valido && (parsed === 1 || (parsed === 13 && !isU14oU18))) {
+                                  col = 'ROSSA';
+                                } else if (col === 'ROSSA' && (!valido || (parsed !== 13 && isU14oU18) || (parsed !== 1 && parsed !== 13))) {
+                                  col = 'BIANCA';
+                                }
+
+                                setCapoCarrelloInModifica({
+                                  ...capoCarrelloInModifica,
+                                  numeroPersonalizzato: n,
+                                  colorePersonalizzato: col
+                                });
+                              }}
+                              className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-2.5 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none focus:border-[#002b80] cursor-pointer"
+                            >
+                              <option value="">N° Calotta...</option>
+                              {NUMERI_CALOTTA.map(n => (
+                                <option key={n} value={String(n)}>N° {n}</option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
+
+                        {haColore && (
+                          <div>
+                            <label className="text-xs font-black uppercase tracking-wider text-slate-600 block mb-1">
+                              Colore Calotta
+                            </label>
+                            <div className="relative">
+                              <select 
+                                disabled={isPortiereRossoObbligatorio}
+                                value={coloreAttuale} 
+                                onChange={e => setCapoCarrelloInModifica({ ...capoCarrelloInModifica, colorePersonalizzato: e.target.value })}
+                                className={`w-full h-11 border rounded-xl px-2.5 text-xs sm:text-sm font-black cursor-pointer focus:outline-none ${
+                                  isPortiereRossoObbligatorio
+                                    ? 'bg-amber-50 text-red-700 border-amber-300 font-extrabold pr-7'
+                                    : 'bg-slate-50 text-slate-800 border-slate-200 focus:border-[#002b80]'
+                                }`}
+                              >
+                                {coloriDisponibili.map(c => (
+                                  <option key={c} value={c}>{c}</option>
+                                ))}
+                              </select>
+                              {isPortiereRossoObbligatorio && (
+                                <FontAwesomeIcon 
+                                  icon={faLock} 
+                                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-red-600 text-xs pointer-events-none" 
+                                />
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="pt-2">
+                    <button
+                      type="submit"
+                      className="w-full h-12 bg-[#002b80] hover:bg-[#002060] active:scale-[0.99] text-white font-black rounded-2xl text-xs sm:text-sm uppercase tracking-wider transition-all shadow-md flex items-center justify-center cursor-pointer"
+                    >
+                      Salva Modifiche Capo
+                    </button>
+                  </div>
+                </form>
+              );
+            })()}
           </div>
         </div>
       )}

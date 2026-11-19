@@ -300,6 +300,7 @@ export default function NegozioUtente({
                 <ProdottoCard 
                   key={prodotto.id} 
                   prodotto={prodotto} 
+                  prodotti={prodotti}
                   onAggiungi={onAggiungiAlCarrello} 
                   isUserAdmin={utenteLoggato.is_admin}
                   listaAtleti={listaAtleti}
@@ -324,7 +325,22 @@ export default function NegozioUtente({
             ordiniPerAtleta.map(({ atleta, articoli }) => {
               const isAperto = atletiEspansi.has(atleta);
               const capiSaldati = articoli.filter(a => a.pagatoOrdine).length;
-              const tuttiSaldati = capiSaldati === articoli.length;
+              const tuttiSaldati = articoli.length > 0 && capiSaldati === articoli.length;
+              const tuttiConsegnati = articoli.length > 0 && articoli.every(
+                a => Boolean(a.completato || a.statoOrdine === 'Completato')
+              );
+
+              const badgeStatoAtleta = tuttiConsegnati
+                ? "Completato"
+                : tuttiSaldati
+                ? "Saldato"
+                : `${capiSaldati}/${articoli.length} pagati`;
+
+              const badgeClasseAtleta = tuttiConsegnati
+                ? 'bg-blue-50 text-[#002b80] border-blue-200'
+                : tuttiSaldati
+                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                : 'bg-amber-50 text-amber-900 border-amber-200';
 
               return (
                 <div 
@@ -364,12 +380,8 @@ export default function NegozioUtente({
                     </div>
 
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className={`text-xs font-black px-2.5 py-1 rounded-xl border ${
-                        tuttiSaldati 
-                          ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
-                          : 'bg-amber-50 text-amber-900 border-amber-200'
-                      }`}>
-                        {tuttiSaldati ? "Saldato" : `${capiSaldati}/${articoli.length} pagati`}
+                      <span className={`text-xs font-black px-2.5 py-1 rounded-xl border ${badgeClasseAtleta}`}>
+                        {badgeStatoAtleta}
                       </span>
                     </div>
                   </div>

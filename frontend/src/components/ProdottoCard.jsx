@@ -6,9 +6,22 @@ import {
   faLock,
   faTriangleExclamation
 } from '@fortawesome/free-solid-svg-icons';
+import { getTaglieByScalaId } from '../utils/taglie';
 
 const TAGLIE_DEFAULT = ["4XS", "3XS", "2XS", "XS", "S", "M", "L", "XL", "2XL", "3XL"];
 const NUMERI_CALOTTA = Array.from({ length: 15 }, (_, i) => i + 1);
+
+const risolviTaglieProdotto = (prodotto) => {
+  if (prodotto?.taglia_unica) return ["Taglia Unica"];
+  if (prodotto?.scala_taglie_id) {
+    const daScala = getTaglieByScalaId(prodotto.scala_taglie_id);
+    if (Array.isArray(daScala) && daScala.length > 0) return daScala;
+  }
+  if (Array.isArray(prodotto?.taglie_disponibili) && prodotto.taglie_disponibili.length > 0) {
+    return prodotto.taglie_disponibili;
+  }
+  return TAGLIE_DEFAULT;
+};
 
 export default function ProdottoCard({
   prodotto,
@@ -18,24 +31,32 @@ export default function ProdottoCard({
   onZoomFoto
 }) {
   const listaTaglieDisponibili = useMemo(() => {
-    if (prodotto.taglia_unica) return ["Taglia Unica"];
-    if (Array.isArray(prodotto.taglie_disponibili) && prodotto.taglie_disponibili.length > 0) {
-      return prodotto.taglie_disponibili;
-    }
-    return TAGLIE_DEFAULT;
+    return risolviTaglieProdotto(prodotto);
   }, [prodotto]);
+
+  const isTagliaUnica = listaTaglieDisponibili.length === 1 && listaTaglieDisponibili[0] === "Taglia Unica";
+
+  const { juniorTaglie, standardTaglie, haGruppi } = useMemo(() => {
+    const junior = listaTaglieDisponibili.filter(t => t.startsWith("Junior "));
+    const standard = listaTaglieDisponibili.filter(t => !t.startsWith("Junior ") && t !== "Taglia Unica");
+    return {
+      juniorTaglie: junior,
+      standardTaglie: standard,
+      haGruppi: junior.length > 0 && standard.length > 0
+    };
+  }, [listaTaglieDisponibili]);
 
   // Stato della taglia selezionata manualmente dall'utente
   const [tagliaSelezionata, setTagliaSelezionata] = useState(null);
 
   // Calcolo derivato al volo: zero useEffect, zero cascading re-renders
   const taglia = useMemo(() => {
-    if (prodotto.taglia_unica) return "Taglia Unica";
+    if (isTagliaUnica) return "Taglia Unica";
     if (tagliaSelezionata && listaTaglieDisponibili.includes(tagliaSelezionata)) {
       return tagliaSelezionata;
     }
     return listaTaglieDisponibili[0] || "M";
-  }, [prodotto.taglia_unica, tagliaSelezionata, listaTaglieDisponibili]);
+  }, [isTagliaUnica, tagliaSelezionata, listaTaglieDisponibili]);
 
   const [atletaSceltoManualmente, setAtletaSceltoManualmente] = useState(null);
   const [nomePersonalizzato, setNomePersonalizzato] = useState('');
@@ -139,8 +160,10 @@ export default function ProdottoCard({
       prodottoId: prodotto.id,
       nomeProdotto: prodotto.nome,
       prezzo: Number(prodotto.prezzo || 0),
-      taglia: prodotto.taglia_unica ? "Taglia Unica" : taglia,
-      taglia_unica: Boolean(prodotto.taglia_unica),
+      scala_taglie_id: prodotto.scala_taglie_id || null,
+      taglie_disponibili: listaTaglieDisponibili,
+      taglia: isTagliaUnica ? "Taglia Unica" : taglia,
+      taglia_unica: isTagliaUnica,
       atleta: atletaSelezionato,
       categoria: categoriaAtleta,
       immagine_url: prodotto.immagine_url || null,
@@ -200,7 +223,7 @@ export default function ProdottoCard({
             {prodotto.nome}
           </h3>
           <span className="text-xs font-semibold text-slate-400 block mt-0.5">
-            {prodotto.taglia_unica 
+            {isTagliaUnica 
               ? "Formato Taglia Unica" 
               : `Disponibile (${listaTaglieDisponibili[0]} — ${listaTaglieDisponibili[listaTaglieDisponibili.length - 1]})`}
           </span>
@@ -237,7 +260,7 @@ export default function ProdottoCard({
         </div>
 
         {/* Selezione Taglia */}
-        {!prodotto.taglia_unica && (
+        {!isTagliaUnica && (
           <div>
             <label className="text-[10px] font-black uppercase tracking-wider text-slate-600 block mb-1">
               TAGLIA:
@@ -248,9 +271,24 @@ export default function ProdottoCard({
               onChange={e => setTagliaSelezionata(e.target.value)}
               className="w-full h-11 bg-slate-50 border border-slate-200 rounded-xl px-3 text-xs sm:text-sm font-bold text-slate-800 focus:outline-none focus:border-[#002b80] cursor-pointer disabled:opacity-50"
             >
-              {listaTaglieDisponibili.map(t => (
-                <option key={t} value={t}>{t}</option>
-              ))}
+              {haGruppi ? (
+                <>
+                  <optgroup label="JUNIOR">
+                    {juniorTaglie.map(t => (
+                      <option key={t} value={t}>{t.replace("Junior ", "")}</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="STANDARD">
+                    {standardTaglie.map(t => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </optgroup>
+                </>
+              ) : (
+                listaTaglieDisponibili.map(t => (
+                  <option key={t} value={t}>{t}</option>
+                ))
+              )}
             </select>
           </div>
         )}
