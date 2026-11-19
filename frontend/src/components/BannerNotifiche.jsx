@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faTriangleExclamation, faXmark } from '@fortawesome/free-solid-svg-icons';
+import { faTriangleExclamation, faXmark, faBoxesPacking } from '@fortawesome/free-solid-svg-icons';
 import { faPaypal } from '@fortawesome/free-brands-svg-icons';
 
 export default function BannerNotifiche({ notifiche = [], onConfermaPagamento }) {
@@ -43,7 +43,47 @@ export default function BannerNotifiche({ notifiche = [], onConfermaPagamento })
     <>
       <div className="space-y-3 mb-5 animate-in fade-in duration-150">
         {notifiche.map((n) => {
+          const isProntoRitiro = n.tipo === 'pronto_ritiro';
           const importoDovuto = Number(n.totaleDovuto || 0);
+
+          if (isProntoRitiro) {
+            return (
+              <div
+                key={n.id}
+                className="p-3.5 sm:p-4 rounded-3xl bg-blue-500/10 border border-blue-500/30 text-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs"
+              >
+                <div className="flex items-start sm:items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-2xl bg-[#002b80] text-white flex items-center justify-center shrink-0 text-sm shadow-xs mt-0.5 sm:mt-0">
+                    <FontAwesomeIcon icon={faBoxesPacking} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="text-xs sm:text-sm font-black text-slate-900 leading-tight">
+                        {n.titolo || "Materiale Pronto per il Ritiro"}
+                      </h4>
+                      <span className="text-[10px] font-black uppercase tracking-wider text-[#002b80] bg-blue-200/70 border border-blue-300 px-2 py-0.5 rounded-md">
+                        {n.disciplina || 'Forniture'}
+                      </span>
+                    </div>
+                    <p className="text-xs font-semibold text-slate-700 mt-1 leading-snug break-words">
+                      {n.messaggio}
+                    </p>
+                  </div>
+                </div>
+
+                {onConfermaPagamento && (
+                  <button
+                    type="button"
+                    onClick={() => onConfermaPagamento(n)}
+                    className="w-8 h-8 rounded-xl bg-white/80 hover:bg-white text-slate-500 hover:text-slate-800 border border-blue-200 flex items-center justify-center text-xs transition-colors cursor-pointer shrink-0 self-end sm:self-center"
+                    title="Chiudi notifica"
+                  >
+                    <FontAwesomeIcon icon={faXmark} />
+                  </button>
+                )}
+              </div>
+            );
+          }
 
           return (
             <div

@@ -192,6 +192,12 @@ export default function PannelloAdmin({
     mostraModalStoricoArchivi
   ]);
 
+  const tuttiOrdiniAttiviCompletati = useMemo(() => {
+    const lista = tuttiGliOrdini || [];
+    if (lista.length === 0) return false;
+    return lista.every(o => o.stato_pagamento === "Completato" || Boolean(o.completato));
+  }, [tuttiGliOrdini]);
+
   const ordiniRaggruppatiFiltrati = useMemo(() => {
     const q = (ricerca || '').toLowerCase().trim();
     if (!q) return ordiniRaggruppati || [];
@@ -1039,9 +1045,13 @@ export default function PannelloAdmin({
                   setCountdownArchivia(5);
                   setMostraModalArchivia(true);
                 }}
-                disabled={(tuttiGliOrdini || []).length === 0}
+                disabled={!tuttiOrdiniAttiviCompletati}
                 className="group h-11 sm:h-12 w-full sm:w-12 sm:hover:w-36 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-100 disabled:text-slate-400 text-white font-black rounded-2xl transition-all duration-300 ease-in-out shadow-xs flex items-center justify-center sm:justify-start px-3 sm:px-0 overflow-hidden cursor-pointer shrink-0 disabled:cursor-not-allowed active:scale-[0.98]"
-                title="Archivia ordine corrente e inizia un nuovo ciclo"
+                title={
+                  tuttiOrdiniAttiviCompletati
+                    ? "Archivia ordine corrente e inizia un nuovo ciclo"
+                    : "Disponibile solo quando tutti gli ordini attivi risultano completati"
+                }
               >
                 <div className="w-5 sm:w-12 h-full flex items-center justify-center shrink-0 mr-2 sm:mr-0">
                   <FontAwesomeIcon icon={faBoxArchive} className="text-xs sm:text-sm" />

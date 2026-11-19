@@ -402,7 +402,7 @@ export default function App() {
 
   const notificheSettoreCorrente = useMemo(() => {
     return notificheUtente.filter(n => {
-      if (n.tipo === 'sollecito' || Boolean(n.linkPaypal)) {
+      if (n.tipo === 'sollecito' || Boolean(n.linkPaypal) || n.tipo === 'pronto_ritiro') {
         return (n.disciplina || 'pallanuoto').toLowerCase() === settoreAttivo.toLowerCase();
       }
       return true;
@@ -1289,25 +1289,79 @@ ASD Circolo Nuoto Lucca`
 
     try {
       const batch = writeBatch(db);
+      const riepilogoPerCliente = new Map();
+
       daAggiornare.forEach(ord => {
         batch.update(doc(db, "ordini", ord.id), {
           stato_pagamento: "Pronto per il ritiro",
           pronto_ritiro_il: serverTimestamp(),
           aggiornato_il: serverTimestamp()
         });
+
+        const emailKey = (ord.email_acquirente || '').trim().toLowerCase();
+        const uidKey = ord.utente_id || null;
+        const chiaveGruppo = uidKey || emailKey;
+        if (!chiaveGruppo) return;
+
+        if (!riepilogoPerCliente.has(chiaveGruppo)) {
+          riepilogoPerCliente.set(chiaveGruppo, {
+            uid: uidKey,
+            email: emailKey,
+            tipologie: new Set(),
+            profili: new Set()
+          });
+        }
+
+        const entry = riepilogoPerCliente.get(chiaveGruppo);
+        const listaCapi = Array.isArray(ord.articoli) && ord.articoli.length > 0 ? ord.articoli : [ord];
+        listaCapi.forEach(capo => {
+          const nomeTip = (capo.nomeProdotto || ord.nomeProdotto || '').trim();
+          const nomeProf = (capo.atleta || ord.atleta || '').trim();
+          if (nomeTip) entry.tipologie.add(nomeTip);
+          if (nomeProf) entry.profili.add(nomeProf);
+        });
       });
+
       await batch.commit();
+
+      for (const [, info] of riepilogoPerCliente.entries()) {
+        let uid = info.uid;
+        if (!uid && info.email) {
+          const qUser = query(collection(db, "utenti"), where("email", "==", info.email));
+          const snapUser = await getDocs(qUser);
+          if (!snapUser.empty) uid = snapUser.docs[0].id;
+        }
+        if (!uid) continue;
+
+        const tipologieArr = Array.from(info.tipologie);
+        const profiliArr = Array.from(info.profili);
+        const testoTipologie = tipologieArr.length > 0 ? tipologieArr.join(', ') : 'Articoli';
+        const testoProfili = profiliArr.length > 0 ? ` per ${profiliArr.join(', ')}` : '';
+
+        const notifRef = doc(db, "utenti", uid, "notifiche", `pronto_ritiro_${settoreAttivo.toLowerCase()}`);
+        await setDoc(notifRef, {
+          tipo: 'pronto_ritiro',
+          titolo: 'Materiale Pronto per il Ritiro',
+          messaggio: `È arrivato il materiale (${testoTipologie}) ordinato${testoProfili} per il settore ${settoreAttivo.toUpperCase()}.`,
+          tipologie: tipologieArr,
+          profili: profiliArr,
+          disciplina: settoreAttivo,
+          letto: false,
+          creato_il: serverTimestamp(),
+          aggiornato_il: serverTimestamp()
+        }, { merge: true });
+      }
 
       mostraMessaggio(
         "Pronti al Ritiro", 
-        `${daAggiornare.length} articoli impostati come pronti per la consegna.`, 
+        `${daAggiornare.length} articoli impostati come pronti per la consegna e notifiche inviate.`, 
         "success"
       );
     } catch (error) {
       console.error("Errore aggiornamento pronti al ritiro:", error);
       mostraMessaggio("Errore: " + error.message, "error");
     }
-  }, [ordiniAttiviAdmin, mostraMessaggio]);
+  }, [ordiniAttiviAdmin, settoreAttivo, mostraMessaggio]);
 
   const esportaCsvAdmin = useCallback(() => {
     try {
